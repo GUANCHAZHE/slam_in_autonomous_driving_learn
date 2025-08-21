@@ -47,6 +47,7 @@ int main(int argc, char** argv) {
             fout << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " ";
         };
 
+        // 设置输出精度 时间为18位，其他为9位
         fout << std::setprecision(18) << timestamp << " " << std::setprecision(9);
         save_vec3(fout, p);
         save_quat(fout, R.unit_quaternion());

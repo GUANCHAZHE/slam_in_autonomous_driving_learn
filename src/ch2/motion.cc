@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
         LOG(INFO) << "pose:T " << pose.translation().transpose();
         // 输出欧拉角（ZYX顺序：yaw, pitch, roll）
         Eigen::Vector3d euler_angles = pose.so3().matrix().eulerAngles(2, 1, 0); // ZYX顺序
-        // LOG(INFO) << "pose:R " << pose.rotationMatrix();
+        // LOG(INFO) << "pose:R " << posesad::NavStated(0, pose, pose.so3() * v_body).rotationMatrix();
         LOG(INFO) << "pose:euler (yaw, pitch, roll): " << euler_angles.transpose();
         ui.UpdateNavState(sad::NavStated(0, pose, v_world));
 
