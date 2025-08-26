@@ -59,7 +59,7 @@ class StaticIMUInit {
     Vec3d cov_acce_ = Vec3d::Zero();  // 加计测量噪声协方差（初始化时评估）
     Vec3d init_bg_ = Vec3d::Zero();   // 陀螺初始零偏
     Vec3d init_ba_ = Vec3d::Zero();   // 加计初始零偏
-    Vec3d gravity_ = Vec3d::Zero();   // 重力
+    Vec3d gravity_ = Vec3d::Zero();   // 重力  由于不确定重力初始方向，选择三维重力方向
     bool is_static_ = false;          // 标志车辆是否静止
     std::deque<IMU> init_imu_deque_;  // 初始化用的数据
     double current_time_ = 0.0;       // 当前时间

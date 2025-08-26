@@ -35,8 +35,8 @@ class ESKF {
     using NavStateT = NavState<S>;                 // 整体名义状态变量类型
 
 
-    struct Option {
-        Option() = default;
+    struct Options {
+        Options() = default;
 
         /// IMU 测量与零偏参数
         double imu_dt_ = 0.01;         // IMU测量间隔  100hz
@@ -47,12 +47,12 @@ class ESKF {
         double bias_acce_var_ = 1e-4;  // 加计零偏游走标准差  σba  p54
 
         /// 里程计参数 里程计
-        double odom_var_ = 0.5;         // ?  单位是啥？
-        double odom_span_ = 0.1;        // 里程计测量间隔
+        double odom_var_ = 0.5;        // ?  单位是啥？
+        double odom_span_ = 0.1;       // 里程计测量间隔
 
         // 轮式编码器
-        double wheel_radius_ = 0.155;   // 轮子半径   单位是米？
-        double circle_pulse_ = 1024.0;  // 编码器每圈脉冲数
+        double wheel_radius_ = 0.155;  // 轮子半径   单位是米？
+        double circle_pulse_ = 1024.0; // 编码器每圈脉冲数
 
         /// RTK 观测参数
         double gnss_pos_noise_ = 0.1;                   // GNSS位置噪声
@@ -63,6 +63,18 @@ class ESKF {
         bool update_bias_gyro_ = true;  // 是否更新陀螺bias
         bool update_bias_acce_ = true;  // 是否更新加计bias
     };
+
+    ESKF(Option option = Option()) : options_(options) {BuildNoise(option); }
+
+    void SetInitialConditions( Options options, const VecT& init_bg, const VecT& init_ba,
+    const VecT& gravity = VecT(0, 0, -9.8)){
+        BuildNoise(options);
+        options_ = options;
+        bg_ = init_bg;
+        ba_ = init_ba;
+        g_ = gravity;
+        cov_ = Mat18T::Identity() * 1e-4;
+    }
 
     // 运动方程和观测方程
     // 这部分的代码放在整体类的外部实现
@@ -81,7 +93,36 @@ class ESKF {
      */
     bool ObserveSE3(const SE3& pose, double trans_noise = 0.1, double ang_noise = 1.0 * math::kDEG2RAD);
 
+    /// accessors
+    /// 获取全量状态
+    NavStateT GetNominalState() const {return NavStateT(current_time_, R_, p_, v_, bg_, ba_); }
+
     private:
+    void BuildNoise(const Options& options) {
+        double ev = options.acce_var_;
+        double et = options.gyro_var_;
+        double eg = options.bias_gyro_var_;
+        double ea = options.bias_acce_var_;
+
+        double ev2 = ev;  // * ev;
+        double et2 = et;  // * et;
+        double eg2 = eg;  // * eg;
+        double ea2 = ea;  // * ea;
+
+        // 设置过程噪声
+        Q_.diagonal() << 0, 0, 0, ev2, ev2,ev2, et2, et2, et2, eg2, eg2, eg2, ea2, ea2, ea2, 0, 0, 0;
+        // diagonal 获取对角线元素
+
+        // 设置里程计噪声
+        doublw o2 = options.odom_var_ * options.odom_var_;
+        odom_noise_.diagonal() << o2, o2, o2;
+
+        // 设置GNSS状态
+        double gp2 = options.gnss_pos_noise_ * options.gnss_pos_noise_ ;
+        double gh2 = options.gnss_height_noise_ * options.gnss_height_noise_;
+        double ga2 = options.gnss_ang_noise_ * options.gnss_ang_noise_;
+        gnss_noise_.diagonal() << gp2, gp2, gp2, ga2, ga2, ga2; 
+    }
     // 成员变量
     double current_time_ = 0.0;  // 当前时间
 
@@ -197,6 +238,13 @@ bool ESKF<S>::Predict(const IMU& imu) {
     return true;
 }
 
+template <typename S>
+bool ESKF<s>::ObserveWheelSpeed(const Odom& odom) {
+    assert(odom.timestamp_ >= current_time_);
+    // odom 修正以及雅可比
+    // 使用三维的轮速观测，H为3*18, 大部分为零
+    Eigen::Matrix<S,3,18> H = 
+}
 
 // GNSS 观测修正
 template <typename S>

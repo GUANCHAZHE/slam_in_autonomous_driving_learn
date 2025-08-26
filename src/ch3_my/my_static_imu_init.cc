@@ -57,14 +57,14 @@ bool StaticIMUInit::TryInit() {
     }
 
     Vec3d mean_gryo, mean_acce;
-    math::ComputeMeanAndCovDiag(init_imu_deque_, mean_gryo,cov_gyro_, [](const IMU& imu) {return imu.gyro_;});
-    math::ComputeMeanAndCovDiag(init_imu_deque_, mean_acce,cov_acce_, [](const IMU& imu) {return imu.acce_;});
+    math::ComputeMeanAndCovDiag(init_imu_deque_, mean_gryo, cov_gyro_, [](const IMU& imu) {return imu.gyro_;});
+    math::ComputeMeanAndCovDiag(init_imu_deque_, mean_acce, cov_acce_, [](const IMU& imu) {return imu.acce_;});
 
     // 以acc均值为方向，取9.8长度为重力 ？？ 这部分的代码是为啥？
     LOG(INFO) <<"meadn acce: " << mean_acce.transpose();  // mean_acce的转置 也就是[0,0,-9.8]
-    // 这时候 mean_acce.norm() 就是求解范数 平方和开根号 的结果就是 -9.8
-    // 感觉就是计算重力的等比例
-    gravity_ = -mean_acce / mean_acce.norm() * options_.gravity_norm_; // ???
+    // 这时候 mean_acce.norm() 就是求解范数 平方和开根号 的结果就是 9.8
+    // 由于不确定重力一开始哪个方向，所以选择将三个方向都考虑进去(x,y,z)
+    gravity_ = -mean_acce / mean_acce.norm() * options_.gravity_norm_; 
 
 
     // 重新计算加速度计的协方差  去除重力影响 
