@@ -64,10 +64,17 @@ class ESKF {
         bool update_bias_acce_ = true;  // 是否更新加计bias
     };
 
-    ESKF(Option option = Option()) : options_(options) {BuildNoise(option); }
+    ESKF(Options option = Options()) : options_(option) {BuildNoise(option); }
 
+    /**
+     * 设置初始条件
+     * @param options 噪声项配置
+     * @param init_bg 初始零偏 陀螺
+     * @param init_ba 初始零偏 加计
+     * @param gravity 重力
+     */
     void SetInitialConditions( Options options, const VecT& init_bg, const VecT& init_ba,
-    const VecT& gravity = VecT(0, 0, -9.8)){
+                                const VecT& gravity = VecT(0, 0, -9.8)){
         BuildNoise(options);
         options_ = options;
         bg_ = init_bg;
@@ -80,6 +87,9 @@ class ESKF {
     // 这部分的代码放在整体类的外部实现
     /// 使用IMU递推
     bool Predict(const IMU& imu);
+
+    /// 使用轮速计观测
+    bool ObserveWheelSpeed(const Odom& odom);
 
     /// 使用GPS观测
     bool ObserveGps(const GNSS& gnss);
@@ -96,6 +106,9 @@ class ESKF {
     /// accessors
     /// 获取全量状态
     NavStateT GetNominalState() const {return NavStateT(current_time_, R_, p_, v_, bg_, ba_); }
+
+    /// 获取重力
+    Vec3d GetGravity() const {return g_;}
 
     private:
     void BuildNoise(const Options& options) {
@@ -114,7 +127,7 @@ class ESKF {
         // diagonal 获取对角线元素
 
         // 设置里程计噪声
-        doublw o2 = options.odom_var_ * options.odom_var_;
+        double o2 = options.odom_var_ * options.odom_var_;
         odom_noise_.diagonal() << o2, o2, o2;
 
         // 设置GNSS状态
@@ -123,33 +136,6 @@ class ESKF {
         double ga2 = options.gnss_ang_noise_ * options.gnss_ang_noise_;
         gnss_noise_.diagonal() << gp2, gp2, gp2, ga2, ga2, ga2; 
     }
-    // 成员变量
-    double current_time_ = 0.0;  // 当前时间
-
-    /// 名义状态 ?
-    VecT p_ = VecT::Zero();
-    VecT v_ = VecT::Zero();
-    SO3  R_;
-    VecT bg_ = VecT::Zero();
-    VecT ba_ = VecT::Zero();
-    VecT g_{0, 0, -9.8};
-
-    /// 误差状态 
-    Vec18T dx_ = Vec18T::Zero();    //  公式3.43  18*1
-
-    /// 协方差阵
-    Mat18T cov_ = Mat18T::Identity();    //  公式3.48b 中的P 18*1
-
-    /// 噪声阵
-    MotionNoiseT Q_ = MotionNoiseT::Zero();     //  公式3.45  18*18
-    OdomNoiseT odom_noise_ = OdomNoiseT::Zero();
-    GnssNoiseT gnss_noise_ = GnssNoiseT::Zero();
-
-    /// 标志位
-    bool first_gnss_ = true;  // 是否为第一个gnss数据
-
-    /// 配置项
-    Options options_;
 
     /// 更新名义状态变量，重置error state  公式3.55 和公式
     void UpdateAndReset() {
@@ -179,6 +165,34 @@ class ESKF {
         J.template block<3, 3>(6, 6) = Mat3T::Identity() - 0.5 * SO3::hat(dx_.template block<3, 1>(6, 0));
         cov_ = J * cov_ * J.transpose();
     }
+
+        // 成员变量
+    double current_time_ = 0.0;  // 当前时间
+
+    /// 名义状态 ?
+    VecT p_ = VecT::Zero();
+    VecT v_ = VecT::Zero();
+    SO3  R_;
+    VecT bg_ = VecT::Zero();
+    VecT ba_ = VecT::Zero();
+    VecT g_{0, 0, -9.8};
+
+    /// 误差状态 
+    Vec18T dx_ = Vec18T::Zero();    //  公式3.43  18*1
+
+    /// 协方差阵
+    Mat18T cov_ = Mat18T::Identity();    //  公式3.48b 中的P 18*1
+
+    /// 噪声阵
+    MotionNoiseT Q_ = MotionNoiseT::Zero();     //  公式3.45  18*18
+    OdomNoiseT odom_noise_ = OdomNoiseT::Zero();
+    GnssNoiseT gnss_noise_ = GnssNoiseT::Zero();
+
+    /// 标志位
+    bool first_gnss_ = true;  // 是否为第一个gnss数据
+
+    /// 配置项
+    Options options_;
 };
 
 using ESKFD = ESKF<double>;
@@ -233,17 +247,39 @@ bool ESKF<S>::Predict(const IMU& imu) {
 
     // mean and cov prediction
     dx_ = F * dx_;  // 公式对应的 3.48a  这行其实没必要算，dx_在重置之后应该为零，因此这步可以跳过，但F需要参与Cov部分计算，所以保留
-    cov_ = F * cov_.eval() * F.transpose() + Q_;    // 公式对应的 3.48b
+    cov_ = F * cov_.eval() * F.transpose() + Q_;    // 公式对应的 3.48b  cov_ = Ppred
     current_time_ = imu.timestamp_;   // 更新时间
     return true;
 }
 
 template <typename S>
-bool ESKF<s>::ObserveWheelSpeed(const Odom& odom) {
+bool ESKF<S>::ObserveWheelSpeed(const Odom& odom) {
     assert(odom.timestamp_ >= current_time_);
     // odom 修正以及雅可比
     // 使用三维的轮速观测，H为3*18, 大部分为零
-    Eigen::Matrix<S,3,18> H = 
+    Eigen::Matrix<S,3,18> H = Eigen::Matrix<S, 3, 18>::Zero();
+    H.template block<3,3>(0, 3) = Mat3T::Identity();
+
+    // 卡尔曼增益
+    Eigen::Matrix<S,18,3> K = cov_ * H.transpose() * (H * cov_ * H.transpose() + odom_noise_).inverse();
+
+    // velocity obs
+    // odom.left_pulse_ / options_.circle_pulse_             p/n 就是弧度
+    // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI   (p/n) *2π 角度
+    // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_ (p/n) *2π /t 角速度w
+    // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_ * options_.wheel_radius_   (p/n)*2π /t * r v=wr 线速度   
+    double velo_l = options_.wheel_radius_ * (odom.left_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;
+    double velo_r = options_.wheel_radius_ * (odom.right_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;
+    double average_vel = 0.5 * (velo_l + velo_r);
+
+    VecT vel_odom(average_vel, 0.0, 0.0);
+    VecT vel_world = R_ * vel_odom;       // 世界坐标下的轮速观测  3.73
+
+    dx_ = K * (vel_world - v_);    // ??? 这部分是为啥？ 3.51b 更新误差
+    cov_ = (Mat18T::Identity() - K * H) * cov_;   // 更新方差  3.51d
+
+    UpdateAndReset();   // 误差状态后处理 3.55(a-f)
+    return true;
 }
 
 // GNSS 观测修正
@@ -269,7 +305,7 @@ bool ESKF<S>::ObserveGps(const GNSS& gnss) {
 
 template <typename S>
 bool ESKF<S>::ObserveSE3(const SE3& pose, double trans_noise, double ang_noise) {
-    /// 既有旋转，也有平移
+    /// se3 pose既有旋转，也有平移
     /// 观测状态变量中的p, R，H为6x18，其余为零
     Eigen::Matrix<S, 6, 18> H = Eigen::Matrix<S, 6, 18>::Zero();
     H.template block<3, 3>(0, 0) = Mat3T::Identity();  // P部分
@@ -293,6 +329,5 @@ bool ESKF<S>::ObserveSE3(const SE3& pose, double trans_noise, double ang_noise) 
     UpdateAndReset();
     return true;
 }
-
 
 }

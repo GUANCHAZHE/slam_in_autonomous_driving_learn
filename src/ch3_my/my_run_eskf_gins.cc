@@ -36,7 +36,8 @@ int main(int argc, char** argv) {
     sad::TxtIO io(FLAGS_txt_path);
     Vec2d antenna_pos(FLAGS_antenna_pox_x, FLAGS_antenna_pox_y);
 
-    auto save_vec3 = [](std::ofstream& fout, const Vec3d& v) {fout << v[0] << " " << v[1] << " " << v[2] << " ";};
+    auto save_vec3 = [](std::ofstream& fout, const Vec3d& v) {
+        fout << v[0] << " " << v[1] << " " << v[2] << " ";};
     auto save_quat = [](std::ofstream& fout, const Quatd& q) {
         fout << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " ";
     };
@@ -77,7 +78,10 @@ int main(int argc, char** argv) {
             // 噪声由初始化器估计
             options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
             options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
-            eskf.SetInitialConditions(options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
+            eskf.SetInitialConditions(options, 
+                                      imu_init.GetInitBg(), 
+                                      imu_init.GetInitBa(), 
+                                      imu_init.GetGravity());
             imu_inited = true;
             return;
         }
@@ -134,8 +138,15 @@ int main(int argc, char** argv) {
         /// Odom 处理函数， 本Odom章只给初始化使用
         imu_init.AddOdom(odom);
         if (FLAGS_with_odom && imu_inited && gnss_inited) {
-            eskf.Ob
+            eskf.ObserveWheelSpeed(odom);
         }
     })
-
+    .Go();
+    while (ui && !ui->ShouldQuit()) {
+        usleep(1e5);
+    }
+    if (ui) {
+        ui->Quit();
+    }
+    return 0;
 }

@@ -94,7 +94,7 @@ bool StaticIMUInit::TryInit() {
               << ", ba = " << init_ba_.transpose() <<", gyro sq = " << cov_gyro_.transpose()
               << ", acce sq = " << cov_acce_.transpose() << ", grav = " << gravity_.transpose()
               << ", norm: " << gravity_.norm();
-    LOG(INFO) << "mean gryo: " << mean_gryo.transpose() << " acce: " << mean_acce.transpose();
+    LOG(INFO) << "mean gyro: " << mean_gryo.transpose() << " acce: " << mean_acce.transpose();
     init_success_ = true;
     return true;    
 }
