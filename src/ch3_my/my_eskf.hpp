@@ -139,7 +139,7 @@ class ESKF {
 
     /// 更新名义状态变量，重置error state  公式3.55 和公式
     void UpdateAndReset() {
-        // 1 带入误差数值
+        // 1 带入误差数值  （3.55）
         p_ += dx_.template block<3, 1>(0, 0);
         v_ += dx_.template block<3, 1>(3, 0);
         R_ = R_ * SO3::exp(dx_.template block<3, 1>(6, 0));
@@ -155,15 +155,15 @@ class ESKF {
         g_ += dx_.template block<3, 1>(15, 0);
 
         // 2 重置ESKF 分为重置均值和协方差部分
-        ProjectCov();   // 3.63 协方差矩阵线性变化
-        dx_.setZero();  // 误差置为0
+        ProjectCov();   // (3.63) 协方差矩阵线性变化
+        dx_.setZero();  // 误差置为0  （3.57）
     }
 
     /// 对P阵进行投影，参考式(3.63)
     void ProjectCov() {
         Mat18T J = Mat18T::Identity();
-        J.template block<3, 3>(6, 6) = Mat3T::Identity() - 0.5 * SO3::hat(dx_.template block<3, 1>(6, 0));
-        cov_ = J * cov_ * J.transpose();
+        J.template block<3, 3>(6, 6) = Mat3T::Identity() - 0.5 * SO3::hat(dx_.template block<3, 1>(6, 0)); // (3.62)
+        cov_ = J * cov_ * J.transpose();  // (3.63)
     }
 
         // 成员变量
@@ -211,14 +211,15 @@ bool ESKF<S>::Predict(const IMU& imu) {
     }
 
     // nominal state 递推
-    // 3-15b p(t+1) = p(t) + v*dt + 1/2(R(a~ - ba))* dt^2 + 1/2*g*dt^2 
+    // 这部分每次运行都会根据之前的数据生成一次，不会保留之前的数据，所以需要更新状态
+    // 3-41a p(t+1) = p(t) + v*dt + 1/2(R(a~ - ba))* dt^2 + 1/2*g*dt^2 
     VecT new_p = p_ + v_ * dt + 0.5 * (R_ * (imu.acce_ - ba_)) * dt * dt + 0.5 * g_ * dt * dt;
-    // 3-15c v(t+1) = v(t) + R(t)(a~ - ba) * dt + g * dt
+    // 3-41b v(t+1) = v(t) + R(t)(a~ - ba) * dt + g * dt
     VecT new_v = v_ + R_ * (imu.acce_ - ba_) * dt + g_ * dt;
-    // 3-15a R(t+1) = R(t) * Exp(w~ - bg) * dt
+    // 3-41c R(t+1) = R(t) * Exp(w~ - bg) * dt
     SO3 new_R = R_ * SO3::exp((imu.gyro_ - bg_) * dt);
 
-    // 更新状态
+    // 更新状态  每次状态都不会创建一个新的，所以需要保留之前的数据
     R_ = new_R;
     v_ = new_v;
     p_ = new_p;
@@ -247,7 +248,7 @@ bool ESKF<S>::Predict(const IMU& imu) {
 
     // mean and cov prediction
     dx_ = F * dx_;  // 公式对应的 3.48a  这行其实没必要算，dx_在重置之后应该为零，因此这步可以跳过，但F需要参与Cov部分计算，所以保留
-    cov_ = F * cov_.eval() * F.transpose() + Q_;    // 公式对应的 3.48b  cov_ = Ppred
+    cov_ = F * cov_.eval() * F.transpose() + Q_;    // 公式对应的 3.48b  cov_ = Ppred 估计协方差矩阵
     current_time_ = imu.timestamp_;   // 更新时间
     return true;
 }
@@ -256,14 +257,15 @@ template <typename S>
 bool ESKF<S>::ObserveWheelSpeed(const Odom& odom) {
     assert(odom.timestamp_ >= current_time_);
     // odom 修正以及雅可比
-    // 使用三维的轮速观测，H为3*18, 大部分为零
+    // 使用三维的轮速观测，H为3*18, 大部分为零，其中3为v速度
     Eigen::Matrix<S,3,18> H = Eigen::Matrix<S, 3, 18>::Zero();
     H.template block<3,3>(0, 3) = Mat3T::Identity();
 
     // 卡尔曼增益
-    Eigen::Matrix<S,18,3> K = cov_ * H.transpose() * (H * cov_ * H.transpose() + odom_noise_).inverse();
+    //  cov_ = Ppred (3.51a)
+    Eigen::Matrix<S,18,3> K = cov_ * H.transpose() * (H * cov_ * H.transpose() + odom_noise_).inverse(); 
 
-    // velocity obs
+    // velocity obs  （3.76）
     // odom.left_pulse_ / options_.circle_pulse_             p/n 就是弧度
     // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI   (p/n) *2π 角度
     // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_ (p/n) *2π /t 角速度w
@@ -275,10 +277,10 @@ bool ESKF<S>::ObserveWheelSpeed(const Odom& odom) {
     VecT vel_odom(average_vel, 0.0, 0.0);
     VecT vel_world = R_ * vel_odom;       // 世界坐标下的轮速观测  3.73
 
-    dx_ = K * (vel_world - v_);    // ??? 这部分是为啥？ 3.51b 更新误差
-    cov_ = (Mat18T::Identity() - K * H) * cov_;   // 更新方差  3.51d
+    dx_ = K * (vel_world - v_);    // (3.51b) 更新误差
+    cov_ = (Mat18T::Identity() - K * H) * cov_;   // 更新方差  (3.51d)
 
-    UpdateAndReset();   // 误差状态后处理 3.55(a-f)
+    UpdateAndReset();   // 误差状态后处理 (3.51c)
     return true;
 }
 
@@ -306,27 +308,32 @@ bool ESKF<S>::ObserveGps(const GNSS& gnss) {
 template <typename S>
 bool ESKF<S>::ObserveSE3(const SE3& pose, double trans_noise, double ang_noise) {
     /// se3 pose既有旋转，也有平移
-    /// 观测状态变量中的p, R，H为6x18，其余为零
+    /// 观测状态变量中的p, R，H为6x18，其余为零，定义如下 p,v,r,bg,ba,g,他的协方差矩阵就是18*18的方阵，每行列分别求导
+    /// 他的大致形状为横向长条 
+    /// |I3,03,03,03,03,03|
+    /// |03,I3,03,03,03,03|
+    ///   
+    ///
     Eigen::Matrix<S, 6, 18> H = Eigen::Matrix<S, 6, 18>::Zero();
-    H.template block<3, 3>(0, 0) = Mat3T::Identity();  // P部分
+    H.template block<3, 3>(0, 0) = Mat3T::Identity();  // P部分（3.70)
     H.template block<3, 3>(3, 6) = Mat3T::Identity();  // R部分（3.66)
 
     // 卡尔曼增益和更新过程
-    Vec6d noise_vec;
+    Vec6d noise_vec;       // 噪声部分的V z = h(x) + v, v~(0,V)
     noise_vec << trans_noise, trans_noise, trans_noise, ang_noise, ang_noise, ang_noise;
+    Mat6d V = noise_vec.asDiagonal();    // 将行向量转换成一个对角阵
 
-    Mat6d V = noise_vec.asDiagonal();
-    Eigen::Matrix<S, 18, 6> K = cov_ * H.transpose() * (H * cov_ * H.transpose() + V).inverse();
+    Eigen::Matrix<S, 18, 6> K = cov_ * H.transpose() * (H * cov_ * H.transpose() + V).inverse();  // (3.51a) 卡尔曼增益K
 
     // 更新x和cov
-    Vec6d innov = Vec6d::Zero();
-    innov.template head<3>() = (pose.translation() - p_);          // 平移部分
-    innov.template tail<3>() = (R_.inverse() * pose.so3()).log();  // 旋转部分(3.67)
+    Vec6d innov = Vec6d::Zero();                                  
+    innov.template head<3>() = (pose.translation() - p_);          // 平移部分  pgnss - p
+    innov.template tail<3>() = (R_.inverse() * pose.so3()).log();  // 旋转部分(3.67) LOG(R^T*Rgnss)
 
-    dx_ = K * innov;
-    cov_ = (Mat18T::Identity() - K * H) * cov_;
+    dx_ = K * innov;   // (3.51b) 更新误差 
+    cov_ = (Mat18T::Identity() - K * H) * cov_; // (3.51d) 更新协方差矩阵
 
-    UpdateAndReset();
+    UpdateAndReset();    // 将误差叠加当前数值 && 重置误差
     return true;
 }
 
