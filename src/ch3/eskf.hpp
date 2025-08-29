@@ -16,7 +16,6 @@
 #include <iomanip>
 
 namespace sad {
-
 /**
  * 书本第3章介绍的误差卡尔曼滤波器
  * 可以指定观测GNSS的读数，GNSS应该事先转换到车体坐标系
@@ -45,7 +44,7 @@ class ESKF {
         /// IMU 测量与零偏参数
         double imu_dt_ = 0.01;  // IMU测量间隔
         // NOTE IMU噪声项都为离散时间，不需要再乘dt，可以由初始化器指定IMU噪声
-        double gyro_var_ = 1e-5;       // 陀螺测量标准差
+        double gyro_var_ = 1e-5;       // 陀螺测量标准差  实际对应Q的是 Cov(ηθ) =diag(σ)
         double acce_var_ = 1e-2;       // 加计测量标准差
         double bias_gyro_var_ = 1e-6;  // 陀螺零偏游走标准差
         double bias_acce_var_ = 1e-4;  // 加计零偏游走标准差
@@ -78,7 +77,7 @@ class ESKF {
      * @param init_ba 初始零偏 加计
      * @param gravity 重力
      */
-    void SetInitialConditions(Options options, const VecT& init_bg, const VecT& init_ba,
+    void SetInitialConditions( Options options, const VecT& init_bg, const VecT& init_ba,
                               const VecT& gravity = VecT(0, 0, -9.8)) {
         BuildNoise(options);
         options_ = options;
@@ -128,7 +127,7 @@ class ESKF {
     void SetCov(const Mat18T& cov) { cov_ = cov; }
 
     /// 获取重力
-    Vec3d GetGravity() const { return g_; }
+    Vec3d GetGravity() const {return g_; }
 
    private:
     void BuildNoise(const Options& options) {
@@ -306,7 +305,7 @@ bool ESKF<S>::ObserveGps(const GNSS& gnss) {
 
 template <typename S>
 bool ESKF<S>::ObserveSE3(const SE3& pose, double trans_noise, double ang_noise) {
-    /// 既有旋转，也有平移
+    /// 既有旋转R，也有位置p
     /// 观测状态变量中的p, R，H为6x18，其余为零
     Eigen::Matrix<S, 6, 18> H = Eigen::Matrix<S, 6, 18>::Zero();
     H.template block<3, 3>(0, 0) = Mat3T::Identity();  // P部分

@@ -6,8 +6,8 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <iomanip>
-#include <fstream>
+#include <fstream>   // 控制文件读写
+#include <iomanip>   // 设置小数点位数
 
 DEFINE_string(txt_path, "./data/ch3/10.txt", "数据文件路径");
 DEFINE_double(antenna_angle, 12.06, "RTK天线安装偏角（角度）");
@@ -25,7 +25,7 @@ int main(int argc, char** argv) {
     FLAGS_colorlogtostderr = true;
     google::ParseCommandLineFlags(&argc, &argv, true);
 
-    if(fLS::FLAGS_txt_path.empty()) {
+    if (fLS::FLAGS_txt_path.empty()) {
         return -1;
     }
 
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
         fout << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " ";
     };
 
-    auto save_result = [&save_vec3, &save_quat](std::ofstream& fout, const sad::NavStated& save_state){
+    auto save_result = [&save_vec3, &save_quat](std::ofstream& fout, const sad::NavStated& save_state) {
         fout << std::setprecision(18) << save_state.timestamp_ << " " << std::setprecision(9);
         save_vec3(fout, save_state.p_);
         save_quat(fout, save_state.R_.unit_quaternion());
@@ -72,11 +72,11 @@ int main(int argc, char** argv) {
         }
 
         // 需要IMU初始化
-        if( !imu_inited) {
+        if ( !imu_inited) {
             // 读取初始零偏，设置ESKF
             sad::ESKFD::Options options;
-            // 噪声由初始化器估计
-            options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
+            // 噪声由初始化器估计   sqrt 开根号
+            options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);   // 这里取标准差  方差开根号
             options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
             eskf.SetInitialConditions(options, 
                                       imu_init.GetInitBg(), 
@@ -103,8 +103,8 @@ int main(int argc, char** argv) {
         /// 记录数据绘图
         save_result(fout, state);
 
-        usleep(1e3);
-    })
+        usleep(1e3);    // 每次IMU的读取时间 100Hz
+    })     // 链式调用 a.b().c().d()
     .SetGNSSProcessFunc([&](const sad::GNSS& gnss) {
         /// GNSS 处理函数
         if (!imu_inited) {
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
 
         gnss_inited = true;
     })
-    .SetOdomProcessFunc([&] (const sad::Odom& odom) {
+    .SetOdomProcessFunc([&](const sad::Odom& odom) {
         /// Odom 处理函数， 本Odom章只给初始化使用
         imu_init.AddOdom(odom);
         if (FLAGS_with_odom && imu_inited && gnss_inited) {
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
     })
     .Go();
     while (ui && !ui->ShouldQuit()) {
-        usleep(1e5);
+        usleep(1e5);   // 每次更新的时间，或者是每次读取数据的时间
     }
     if (ui) {
         ui->Quit();
