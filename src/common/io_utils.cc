@@ -31,6 +31,7 @@ void TxtIO::Go() {
         std::string data_type;
         ss >> data_type;
 
+        // TODO 还需要单独处理得到相关的旋转角度和距离速度等信息，单独拿出来查看下
         if (data_type == "IMU" && imu_proc_) {
             double time, gx, gy, gz, ax, ay, az;
             ss >> time >> gx >> gy >> gz >> ax >> ay >> az;

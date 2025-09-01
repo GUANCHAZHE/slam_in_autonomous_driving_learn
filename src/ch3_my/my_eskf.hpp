@@ -219,7 +219,8 @@ bool ESKF<S>::Predict(const IMU& imu) {
     // 3-41c R(t+1) = R(t) * Exp(w~ - bg) * dt
     SO3 new_R = R_ * SO3::exp((imu.gyro_ - bg_) * dt);
 
-    // 更新状态  每次状态都不会创建一个新的，所以需要保留之前的数据
+    // 更新预测状态 xpred  
+    // 每次状态都不会创建一个新的，所以需要保留之前的数据
     R_ = new_R;
     v_ = new_v;
     p_ = new_p;
@@ -276,7 +277,7 @@ bool ESKF<S>::ObserveWheelSpeed(const Odom& odom) {
     double velo_r = options_.wheel_radius_ * (odom.right_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;
     double average_vel = 0.5 * (velo_l + velo_r);
 
-    VecT vel_odom(average_vel, 0.0, 0.0);
+    VecT vel_odom(average_vel, 0.0, 0.0);  // (vx, vy, vz)
     VecT vel_world = R_ * vel_odom;       // 世界坐标下的轮速观测  3.73
 
     dx_ = K * (vel_world - v_);    // (3.51b) 更新误差
@@ -293,6 +294,7 @@ bool ESKF<S>::ObserveGps(const GNSS& gnss) {
     // GNSS 观测修正 确保读取最新的数据
     assert(gnss.unix_time_ >= current_time_);
     
+    // 这个记录初始的R，P？？？有啥用 标牌世界远点么？
     if (first_gnss_) {
         R_ = gnss.utm_pose_.so3();
         p_ = gnss.utm_pose_.translation();

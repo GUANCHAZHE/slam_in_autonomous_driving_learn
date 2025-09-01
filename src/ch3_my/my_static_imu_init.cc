@@ -51,7 +51,7 @@ bool StaticIMUInit::AddOdom(const Odom& odom) {
     return true;
 }
 
-//  TODO 这部分代码还需要再实际了解一下，到底是如何确定重力方向的，自己尝试写一遍
+// 
 bool StaticIMUInit::TryInit() {
     if (init_imu_deque_.size() < 10 ) {
         return false;

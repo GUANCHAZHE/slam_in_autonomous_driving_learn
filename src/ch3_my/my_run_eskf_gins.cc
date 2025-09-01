@@ -65,13 +65,16 @@ int main(int argc, char** argv) {
     Vec3d origin = Vec3d::Zero();
 
     io.SetIMUProcessFunc([&](const sad::IMU& imu) {
-        // IMU 数据的预处理
+        // IMU 初始化
+        // 在静止的时候(Odom判断)，持续读取IMU数据，维持10s容量
+        // 初始化完成之后设置InitSuccess 为true
         if (!imu_init.InitSuccess()) {
             imu_init.AddIMU(imu);
             return;
         }
 
-        // 需要IMU初始化
+        // 初始化完成，读取初始化的参数g，ba，bg，cov(g),cov(a)
+        // 设置eskf初始化参数
         if ( !imu_inited) {
             // 读取初始零偏，设置ESKF
             sad::ESKFD::Options options;
@@ -103,7 +106,7 @@ int main(int argc, char** argv) {
         /// 记录数据绘图
         save_result(fout, state);
 
-        usleep(1e3);    // 每次IMU的读取时间 100Hz
+        usleep(1e3);    // TODO 每次IMU的读取时间 100Hz  这个会什么东西？
     })     // 链式调用 a.b().c().d()
     .SetGNSSProcessFunc([&](const sad::GNSS& gnss) {
         /// GNSS 处理函数
@@ -116,7 +119,7 @@ int main(int argc, char** argv) {
             return;
         }
 
-        /// 去除原点
+        /// 去除原点 利用第一个GNSS数据，全体数据减去第一个数据 从而减小数据存储
         if (!first_gnss_set) {
             origin = gnss_convert.utm_pose_.translation();
             first_gnss_set = true;
@@ -141,9 +144,9 @@ int main(int argc, char** argv) {
             eskf.ObserveWheelSpeed(odom);
         }
     })
-    .Go();
+    .Go();   // 一次读取完所有的数据
     while (ui && !ui->ShouldQuit()) {
-        usleep(1e5);   // 每次更新的时间，或者是每次读取数据的时间
+        usleep(1e5);   // 每次更新的时间，或者是每次读取数据的时间 1e5 = 100ms
     }
     if (ui) {
         ui->Quit();
