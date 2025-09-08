@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
         /// 记录数据绘图
         save_result(fout, state);
 
-        usleep(1e3);    // TODO 每次IMU的读取时间 100Hz  这个会什么东西？
+        usleep(1e3);    // 1e3 微妙 = 1ms 防止读取过快 理论应该为10ms 100Hz 0.1s 
     })     // 链式调用 a.b().c().d()
     .SetGNSSProcessFunc([&](const sad::GNSS& gnss) {
         /// GNSS 处理函数
@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
     })
     .Go();   // 一次读取完所有的数据
     while (ui && !ui->ShouldQuit()) {
-        usleep(1e5);   // 每次更新的时间，或者是每次读取数据的时间 1e5 = 100ms
+        usleep(1e5); // 显示间隔，1e5 = 100000 微妙 = 100ms = 10hz   
     }
     if (ui) {
         ui->Quit();

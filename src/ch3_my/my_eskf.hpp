@@ -220,7 +220,8 @@ bool ESKF<S>::Predict(const IMU& imu) {
     SO3 new_R = R_ * SO3::exp((imu.gyro_ - bg_) * dt);
 
     // 更新预测状态 xpred  
-    // 每次状态都不会创建一个新的，所以需要保留之前的数据
+    // 每次状态都不会创建一个新的，所以需要保留之前的数据 ？？？
+    // TODO 这里的时间切换还不是很懂，在代码里如何实现的，只明白一个大概，具体的实现还需要再看看
     R_ = new_R;
     v_ = new_v;
     p_ = new_p;
