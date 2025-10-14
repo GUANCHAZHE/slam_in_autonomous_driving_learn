@@ -42,6 +42,15 @@
 # cmake
 **build**
 
+# pdf 文件
+*.pdf
+
+# 安装包
+*.tar.gz
+*.zip
+*.rar
+
+
 bin
 .idea
 data/ch6/frame*.txt

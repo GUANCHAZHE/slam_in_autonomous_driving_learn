@@ -273,10 +273,10 @@ bool ESKF<S>::ObserveWheelSpeed(const Odom& odom) {
     // odom.left_pulse_ / options_.circle_pulse_             p/n 就是弧度
     // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI   (p/n) *2π 角度
     // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_ (p/n) *2π /t 角速度w
-    // odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_ * options_.wheel_radius_   (p/n)*2π /t * r v=wr 线速度   
-    double velo_l = options_.wheel_radius_ * (odom.left_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;
-    double velo_r = options_.wheel_radius_ * (odom.right_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;
-    double average_vel = 0.5 * (velo_l + velo_r);
+    // options_.wheel_radius_ * odom.left_pulse_ / options_.circle_pulse_ * 2 *M_PI / options_.odom_span_    r * (p/n)*2π /t  v=wr 线速度   
+    double velo_l = options_.wheel_radius_ * (odom.left_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;   //3.76
+    double velo_r = options_.wheel_radius_ * (odom.right_pulse_ / options_.circle_pulse_) * 2 * M_PI / options_.odom_span_;  //3.76
+    double average_vel = 0.5 * (velo_l + velo_r);   // v = (vl + vr) / 2
 
     VecT vel_odom(average_vel, 0.0, 0.0);  // (vx, vy, vz)
     VecT vel_world = R_ * vel_odom;       // 世界坐标下的轮速观测  3.73
