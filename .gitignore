@@ -57,7 +57,7 @@
 .vscode/extensions.json
 
 # Bin directory (build output)
-!bin/
+/bin/
 
 # IDE
 .idea
