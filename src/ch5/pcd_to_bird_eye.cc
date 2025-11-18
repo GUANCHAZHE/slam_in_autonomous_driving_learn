@@ -12,7 +12,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-using PointType = pcl::PointXYZI;
+using PointType = pcl::PointXYZ;
 using PointCloudType = pcl::PointCloud<PointType>;
 
 DEFINE_string(pcd_path, "./data/ch5/map_example.pcd", "点云文件路径");
