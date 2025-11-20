@@ -8,12 +8,20 @@ import logging
 import os
 import numpy as np
 import cv2
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import image_rotate
 
 min_z = 0.2
 max_z = 2.5
 image_path = "./bev11111.png"
+range_image_path = "./range_image.png"
+default_pcd_path='./data/ch5/map_example.pcd'
+
+azimuth_resolution_deg = 0.3      # 方位角的分辨率，水平方向分辨率
+elevation_range = 15              # 俯仰角的上下范围度数
+elevation_rows = 16               # 俯仰角对应的行数
+lidar_height = 1.128              # 雷达的高度 单位米
 
 def pcd_to_bird(points_np, resolution = 0.1):
     min_x, min_y, _= np.min(points_np, axis=0)
@@ -51,25 +59,161 @@ def pcd_to_bird(points_np, resolution = 0.1):
     print(f"完成图像存储位于{image_path}")
     return image
 
-
-def brute_force(src, dst):
+def scan_to_range_image(point_np):
     """
-    暴力匹配，计算src到目标点云的距离，找出其中最近的一个
+    将扫描到的点云转换为距离图，可以检测地形，比如台阶之类的
     """
+    image_cols = int( 360 / azimuth_resolution_deg)
+    imgae_rows = int( elevation_rows)
+    print(f"range iamge : {imgae_rows} * {image_cols}")
 
+    # 生成hsv图像更好的显示图像
+    image = np.zeros((imgae_rows, image_cols, 3), dtype=np.uint8)
+
+    # elevation 分辨率
+    ele_resolution = (elevation_range * 2) / imgae_rows
+
+    for i in range(len(point_np)):
+        pt= point_np[i]
+        px = pt[0]
+        py = pt[1]
+        pz = pt[2]
+        # 这里的range 并非 三维视图的 x^2 + y^2 + z^2 ，而是地上的线
+        range_aval = np.sqrt(px * px + py * py)
+        if range_aval < 1e-6:
+            continue;    
+        azimuth = np.arctan2(py, px) * 180 / np.pi  # 度
+        elevation = np.arctan2(pz - lidar_height, range_aval) * 180 / np.pi  #  看不懂他是如何定义的
+        # elevation = np.arcsin((pz - lidar_height) / range_aval) * 180 / np.pi  #  看不懂他是如何定义的
+
+        # print(f"elevation_tan {elevation_tan} elevation_sin {elevation_sin}")
+
+        if azimuth < 0:
+            azimuth += 360
+
+        x = int(azimuth / azimuth_resolution_deg)                       # 行
+        y = int((elevation + elevation_range) / ele_resolution + 0.5)   # 列
+
+        if 0 <= x  < image_cols and 0 <= y < imgae_rows:
+            image[y, x] = [int(range_aval / 100 * 255.0), 255, 127]
+    
+    # 将y向上翻转
+    image_flipped = np.flip(image, axis=0)
+
+    # hsv 转 bgr
+    image_rbg = cv2.cvtColor(image_flipped, cv2.COLOR_HSV2BGR)
+    cv2.imwrite(range_image_path, image_rbg)
+    print(f"图像存储于 {range_image_path}")
+    return image_rbg
+
+        
+
+
+def bfnn(target_point, point_np):
+    """
+    暴力匹配，计算src到目标点云的距离三维距离，找出其中最近的一个
+    """
     distance = []
+    for i in range(len(point_np)):
+        dis = np.linalg.norm( target_point - point_np[i] )
+        distance.append(dis)
+    np.sort(distance)
 
-def load_and_vis_pcd(pcd_path):
+    return distance
+
+def bfnn_cloud(point_np_1, point_np_2):
+    """
+    两个点云之间的匹配，计算他们之间的相对误差
+    返回结果为matches
+    """
+    matches = []
+
+    for i in range(len(point_np_2)):
+        dis = bfnn(point_np_1[i], point_np_2)
+        matches.append(dis)
+    
+    return matches
+
+def bfnn_cloud_mt(point_np_1 = None, point_np_2 = None):
+    """
+    多线程最近邻匹配
+    返回与 cloud2 相同长度的 matches 数组
+    每个元素为 (idx1, idx2)
+    """
+
+    # matches = [None] * len(point_np_2)
+
+    # with THrea
+
+def load_and_vis_pcd(pcd_path, is_vis):
    # 加载点云
     cloud = o3d.io.read_point_cloud(pcd_path)
     print(f"点云点数: {len(cloud.points)}")
     
     # 可视化
-    o3d.visualization.draw_geometries([cloud])
+    if is_vis == True:
+        o3d.visualization.draw_geometries([cloud])
 
     cloud_points_np = np.asarray(cloud.points)
 
     return cloud, cloud_points_np
+
+
+
+
+
+
+
+
+
+
+
+
+#####################  TEST CODE  ##################
+def test_bfnn_cloud():
+    point_np_1 = np.array([[1,1,1], [2,2,2], [3,3,3]])
+    point_np_2 = np.array([[1.2,1.2,1.2], [2.2,2.2,2.2], [3.2,3.2,3.2]])
+    t1 = time.time()
+    matcehs = bfnn_cloud(point_np_1, point_np_2)
+    t2 = time.time()
+    t = t2 - t1
+
+    for i in range(len(matcehs)):
+        print(matcehs[i])
+    print(f"测试完成时间 {t}, 测试成功")
+
+
+
+
+
+
+
+
+
+
+def test_brute_force():
+    target = [0, 0, 0]
+    point_np = np.array([[1,1,1], [2,2,2], [3,3,3]])
+    dis = bfnn(target, point_np)
+    print(dis[0])
+    print("brute force 测试通过")
+
+def test_brute_force_defalut_pcd():
+
+    _, point_np =load_and_vis_pcd(default_pcd_path, False)
+    target = [0, 0, 0]
+    t1 = time.time()
+    dis = bfnn(target, point_np)
+    t2 = time.time()
+
+    print(f"距离最近的点是 dis[0] {dis[0]}")
+
+    t = t2 - t1
+
+    print(f"测试完成时间 {t}, 测试成功")
+
+    print("brute force 测试通过")
+
 
 
 def main():
@@ -82,9 +226,19 @@ def main():
         logging.error(f"文件不存在: {args.pcd_path}")
         return -1
     
-    cloud, cloud_points_np = load_and_vis_pcd(args.pcd_path)
+    # cloud, cloud_points_np = load_and_vis_pcd(args.pcd_path, False)
 
-    pcd_to_bird(cloud_points_np)
+    # image = scan_to_range_image(cloud_points_np)
+
+    # pcd_to_bird(cloud_points_np)
+
+
+
+    #   TEST 
+    # test_brute_force()
+    # test_bfnn_cloud()
+    test_brute_force_defalut_pcd()
+
 
 if __name__ == "__main__":
     main()
