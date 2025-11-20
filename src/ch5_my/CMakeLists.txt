@@ -21,26 +21,27 @@ target_link_libraries(my_scan_to_range_image
         gflags
         )
 
-add_library(${PROJECT_NAME}.ch5
-        bfnn.cc
-        kdtree.cc
-        octo_tree.cc
-        )
-# target_link_libraries(${PROJECT_NAME}.ch5
+# add_library(${PROJECT_NAME}.ch5_my
+#         my_bfnn.cc
+#         # kdtree.cc
+#         # octo_tree.cc
+#         )
+
+# target_link_libraries(${PROJECT_NAME}.ch5_my
 #         tbb
 #         )
 
-# add_executable(linear_fitting linear_fitting.cc)
-# target_link_libraries(linear_fitting
-#         ${PCL_LIBRARIES}
-#         ${GLOG_LIBRARIES}
-#         ${OpenCV_LIBS}
-#         gflags
-#         )
+# # add_executable(linear_fitting linear_fitting.cc)
+# # target_link_libraries(linear_fitting
+# #         ${PCL_LIBRARIES}
+# #         ${GLOG_LIBRARIES}
+# #         ${OpenCV_LIBS}
+# #         gflags
+# #         )
 
-ADD_EXECUTABLE(my_test_nn my_test_nn.cc)
-ADD_TEST(my_test_nn my_test_bfnn)
+# ADD_EXECUTABLE(my_test_nn my_test_nn.cc)
+# ADD_TEST(my_test_nn my_test_bfnn)
 
-# target_link_libraries(test_nn
-#         gtest pthread glog gflags ${PROJECT_NAME}.ch5 ${PROJECT_NAME}.common ${PCL_LIBRARIES} tbb
+# target_link_libraries(my_test_nn
+#         gtest gmock pthread glog gflags ${PROJECT_NAME}.ch5_my ${PROJECT_NAME}.common ${PCL_LIBRARIES} tbb
 #         )

@@ -105,6 +105,7 @@ bool GridNN<dim>::SetPointCloud(CloudPtr cloud) {
 }
 
 template <int dim>
+// 输入相关的点，经过四舍五入和转换为int类型的数值 返回得到grid
 Eigen::Matrix<int, dim, 1> GridNN<dim>::Pos2Grid(const Eigen::Matrix<float, dim, 1>& pt) {
     return pt.array().template round().template cast<int>();
     // Eigen::Matrix<int, dim, 1> ret;
@@ -148,6 +149,7 @@ bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, si
         auto dkey = key + delta;
         auto iter = grids_.find(dkey);
         if (iter != grids_.end()) {
+            // 将iter的所有变量全都加到idx_to_check的末尾
             idx_to_check.insert(idx_to_check.end(), iter->second.begin(), iter->second.end());
         }
     });
