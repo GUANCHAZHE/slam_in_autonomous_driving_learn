@@ -85,20 +85,33 @@ class GridNN {
 
 // 实现
 template <int dim>
+// 将空间中相邻的点都放入到一个栅格grid中
 bool GridNN<dim>::SetPointCloud(CloudPtr cloud) {
+    // 建立所有点云的索引，防止重复
+    // [0, 1, 2, ..., N-1]
     std::vector<size_t> index(cloud->size());
     std::for_each(index.begin(), index.end(), [idx = 0](size_t& i) mutable { i = idx++; });
 
+    // 在建立的索引中进行网格化
     std::for_each(index.begin(), index.end(), [&cloud, this](const size_t& idx) {
         auto pt = cloud->points[idx];
         auto key = Pos2Grid(ToEigen<float, dim>(pt));
+        // 如果这个栅格内没有点，构建栅格，插入点
         if (grids_.find(key) == grids_.end()) {
             grids_.insert({key, {idx}});
         } else {
+        // 栅格内存在点，将这个点索引插入栅格
             grids_[key].emplace_back(idx);
         }
     });
-
+    
+    // 最终结果假设如下：
+    // 假设点云 8 个点，被分成 3 个格子：
+    // grids_ = {
+    // (0, 0, 1): [0, 2, 5],
+    // (1, 3, 0): [1, 3],
+    // (-1, 7, 2): [4, 6, 7]
+    // }
     cloud_ = cloud;
     LOG(INFO) << "grids: " << grids_.size();
     return true;
@@ -140,14 +153,24 @@ void GridNN<3>::GenerateNearbyGrids() {
 }
 
 template <int dim>
+// 1. 查找目标点的最近栅格
+// 2. 根据最近邻的定义，查找附近的栅格
+// 3. 暴力匹配这些栅格的点
 bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, size_t& idx) {
     // 在pt栅格周边寻找最近邻
     std::vector<size_t> idx_to_check;
     auto key = Pos2Grid(ToEigen<float, dim>(pt));
 
+    // 按照之前设置的几个近邻搜索，NEARBY4/6/8
+    // 2d的 4个 上下左右
+    // 3d的 6个 上下左右前后
+    // 这个 delta到底是如何确定的，同时的并行化搜索不会出现问题么？
+    // 并行化搜索四个方向
+    // 1. 通过栅格化搜索缩小范围，找到最近的栅格范围内
     std::for_each(nearby_grids_.begin(), nearby_grids_.end(), [&key, &idx_to_check, this](const KeyType& delta) {
         auto dkey = key + delta;
-        auto iter = grids_.find(dkey);
+        // 这里搜索得到最近邻的所有点，也就是搜索到的栅格的所有点
+        auto iter = grids_.find(dkey);    
         if (iter != grids_.end()) {
             // 将iter的所有变量全都加到idx_to_check的末尾
             idx_to_check.insert(idx_to_check.end(), iter->second.begin(), iter->second.end());
@@ -158,14 +181,17 @@ bool GridNN<dim>::GetClosestPoint(const PointType& pt, PointType& closest_pt, si
         return false;
     }
 
+    // 2. 通过反索引得到最近栅格对应的点云数据，标记新点云的索引
     // brute force nn in cloud_[idx]
     CloudPtr nearby_cloud(new PointCloudType);
     std::vector<size_t> nearby_idx;
     for (auto& idx : idx_to_check) {
-        nearby_cloud->points.template emplace_back(cloud_->points[idx]);
-        nearby_idx.emplace_back(idx);
+        // 这是在模版编程，需要显示指明point的类型，然后再emplace_back，这是语法提示符
+        nearby_cloud->points.template emplace_back(cloud_->points[idx]);  // 添加最近的点
+        nearby_idx.emplace_back(idx);                                     // 添加最近的点的索引
     }
 
+    // 3. 跟新点云的索引，bf匹配新点云团
     size_t closest_point_idx = bfnn_point(nearby_cloud, ToVec3f(pt));
     idx = nearby_idx.at(closest_point_idx);
     closest_pt = cloud_->points[idx];

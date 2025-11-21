@@ -2,6 +2,7 @@
 # 简化版本，只使用 Open3D
 from ctypes import pointer
 from math import inf
+from traceback import print_tb
 import open3d as o3d
 import argparse
 import logging
@@ -9,13 +10,12 @@ import os
 import numpy as np
 import cv2
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 min_z = 0.2
 max_z = 2.5
 image_path = "./bev11111.png"
-range_image_path = "./range_image.png"
+range_image_path = "./my_range_image.png"
 default_pcd_path='./data/ch5/map_example.pcd'
 
 azimuth_resolution_deg = 0.3      # 方位角的分辨率，水平方向分辨率
@@ -63,15 +63,15 @@ def scan_to_range_image(point_np):
     """
     将扫描到的点云转换为距离图，可以检测地形，比如台阶之类的
     """
-    image_cols = int( 360 / azimuth_resolution_deg)
-    imgae_rows = int( elevation_rows)
-    print(f"range iamge : {imgae_rows} * {image_cols}")
+    image_cols = int( 360 / azimuth_resolution_deg)   # 1200
+    image_rows = int( elevation_rows)                 # 16
+    print(f"range iamge : {image_rows} * {image_cols}")
 
     # 生成hsv图像更好的显示图像
-    image = np.zeros((imgae_rows, image_cols, 3), dtype=np.uint8)
+    image = np.zeros((image_rows, image_cols, 3), dtype=np.uint8)
 
     # elevation 分辨率
-    ele_resolution = (elevation_range * 2) / imgae_rows
+    ele_resolution = (elevation_range * 2) / image_rows
 
     for i in range(len(point_np)):
         pt= point_np[i]
@@ -81,10 +81,13 @@ def scan_to_range_image(point_np):
         # 这里的range 并非 三维视图的 x^2 + y^2 + z^2 ，而是地上的线
         range_aval = np.sqrt(px * px + py * py)
         if range_aval < 1e-6:
-            continue;    
+            continue;     # 过滤数值较小的点
         azimuth = np.arctan2(py, px) * 180 / np.pi  # 度
-        elevation = np.arctan2(pz - lidar_height, range_aval) * 180 / np.pi  #  看不懂他是如何定义的
-        # elevation = np.arcsin((pz - lidar_height) / range_aval) * 180 / np.pi  #  看不懂他是如何定义的
+
+        ratio = (pz - lidar_height) /range_aval
+        ratio = np.clip(ratio, -1.0, 1.0)           # 考虑范围 ，将它传递到 (-1, 1)
+        # elevation = np.arctan2(pz - lidar_height, range_aval) * 180 / np.pi  # 这个就是标准的空间几何定义
+        elevation = np.arcsin(ratio) * 180 / np.pi  # 这个貌似是转换视图的定义 是 
 
         # print(f"elevation_tan {elevation_tan} elevation_sin {elevation_sin}")
 
@@ -94,7 +97,7 @@ def scan_to_range_image(point_np):
         x = int(azimuth / azimuth_resolution_deg)                       # 行
         y = int((elevation + elevation_range) / ele_resolution + 0.5)   # 列
 
-        if 0 <= x  < image_cols and 0 <= y < imgae_rows:
+        if 0 <= x  < image_cols and 0 <= y < image_rows:
             image[y, x] = [int(range_aval / 100 * 255.0), 255, 127]
     
     # 将y向上翻转
@@ -141,7 +144,7 @@ def bfnn_cloud_mt(point_np_1 = None, point_np_2 = None):
     每个元素为 (idx1, idx2)
     """
 
-    # matches = [None] * len(point_np_2)
+    matches = [None] * len(point_np_2)
 
     # with THrea
 
@@ -183,7 +186,13 @@ def test_bfnn_cloud():
     print(f"测试完成时间 {t}, 测试成功")
 
 
-
+def test_scan_to_range_image(point_np=None):
+    _, point_np =load_and_vis_pcd(default_pcd_path, False)
+    t1 = time.time()
+    scan_to_range_image(point_np)
+    t2 = time.time()
+    t = t2 - t1
+    print(f"完成scan_to_range_image 测试 消耗时间 t{t}")
 
 
 
@@ -228,8 +237,6 @@ def main():
     
     # cloud, cloud_points_np = load_and_vis_pcd(args.pcd_path, False)
 
-    # image = scan_to_range_image(cloud_points_np)
-
     # pcd_to_bird(cloud_points_np)
 
 
@@ -237,8 +244,8 @@ def main():
     #   TEST 
     # test_brute_force()
     # test_bfnn_cloud()
-    test_brute_force_defalut_pcd()
-
+    # test_brute_force_defalut_pcd()
+    test_scan_to_range_image()
 
 if __name__ == "__main__":
     main()

@@ -13,8 +13,8 @@ using PointCloudType = pcl::PointCloud<PointType>;
 DEFINE_string(pcd_path, "./data/ch5/scan_example.pcd", "点云文件路径");
 DEFINE_double(azimuth_resoluution_deg, 0.3, "方位角分辨率");
 DEFINE_int32(elevation_rows, 16, "俯仰角对应的行数");
-DEFINE_double(evalution_range, 15.0, "俯仰角的范围");
-DEFINE_double(light_height, 1.128, "雷达的安装高度");
+DEFINE_double(elevation_range, 15.0, "俯仰角的范围");
+DEFINE_double(lidar_height, 1.128, "雷达的安装高度");
 
 void GenerateRangeImage(PointCloudType::Ptr cloud) {
     int image_cols = int(360 / FLAGS_azimuth_resoluution_deg);
@@ -24,19 +24,23 @@ void GenerateRangeImage(PointCloudType::Ptr cloud) {
     // 生成hsv图像更好的显示图像
     cv::Mat image(image_rows, image_cols, CV_8UC3, cv::Scalar(0, 0, 0));
 
-    double ele_resolution = FLAGS_evalution_range * 2 / FLAGS_elevation_rows;  // elevation 分辨率
+    double ele_resolution = FLAGS_elevation_range * 2 / FLAGS_elevation_rows;  // elevation 分辨率
 
     for (const auto& pt : cloud->points) {
         double azimuth = atan2(pt.y, pt.x) * 180 / M_PI;
         double range = sqrt(pt.x * pt.x + pt.y * pt.y);
-        double elevation = asin(pt.z - FLAGS_light_height) / range * 180 / M_PI;
+        // 这里需要考虑Nan的情况，这就是为什么图像会出现黑点
+        // 将角度限制在 (-1, 1)
+        double ratio = (pt.z - FLAGS_lidar_height) /range;
+        ratio = std::max(-1.0, std::min(1.0, ratio));
+        double elevation = asin(ratio) * 180 / M_PI;   
 
         if (azimuth < 0) {
             azimuth += 360;
         }
 
-        int x = int(azimuth / FLAGS_azimuth_resoluution_deg);                              // 行
-        int y = int((elevation  + FLAGS_azimuth_resoluution_deg) / ele_resolution + 0.5);  // 列
+        int x = int(azimuth / FLAGS_azimuth_resoluution_deg);                           // 行
+        int y = int((elevation  + FLAGS_elevation_range) / ele_resolution + 0.5);       // 列
 
         if (x >= 0 && x < image.cols && y >= 0 && y < image.rows) {
             image.at<cv::Vec3b>(y,x ) = cv::Vec3b(uchar(range / 100 * 255.0), 255, 127);
