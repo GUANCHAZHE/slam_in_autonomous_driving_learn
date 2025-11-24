@@ -115,16 +115,24 @@ bool FitPlane(std::vector<Eigen::Matrix<S, 3, 1>>& data, Eigen::Matrix<S, 4, 1>&
         return false;
     }
 
+    // 将坐标转换为齐次表示x = [x^T, 1]^T
     Eigen::MatrixXd A(data.size(), 4);
     for (int i = 0; i < data.size(); ++i) {
         A.row(i).head<3>() = data[i].transpose();
         A.row(i)[3] = 1.0;
     }
 
+    // 执行 SVD 分解
+    // Eigen::ComputeThinV: 只计算 V 矩阵的 "thin" (或 "economy size") 形式，对于 N x 4 的 A，V 是 4 x 4
     Eigen::JacobiSVD svd(A, Eigen::ComputeThinV);
-    plane_coeffs = svd.matrixV().col(3);
+    
+    // 获取 V 矩阵
+    // V 是一个 4 x 4 的矩阵，其列向量是 A^T * A 的特征向量
+    // 最小奇异值对应的特征向量是 V 的最后一列 (索引 3)
+    plane_coeffs = svd.matrixV().col(3); // 将 V 的第 3 列 (最小奇异值对应的特征向量) 作为平面系数
 
     // check error eps
+    // 将之前的数值带入到平面计算误差
     for (int i = 0; i < data.size(); ++i) {
         double err = plane_coeffs.template head<3>().dot(data[i]) + plane_coeffs[3];
         if (err * err > eps) {
@@ -142,18 +150,39 @@ bool FitLine(std::vector<Eigen::Matrix<S, 3, 1>>& data, Eigen::Matrix<S, 3, 1>& 
         return false;
     }
 
+
+    // 2. 计算数据点的质心 (Centroid)，作为直线的起点 origin
+    //    std::accumulate 是 C++ 标准库函数，用于累加。
+    //    Eigen::Matrix<S, 3, 1>::Zero().eval() 创建一个零向量，eval() 确保得到一个可计算的表达式。
     origin = std::accumulate(data.begin(), data.end(), Eigen::Matrix<S, 3, 1>::Zero().eval()) / data.size();
 
+    // 3. 构建去质心后的数据矩阵 Y (N x 3)
+    //    每一行是原始点减去质心后的向量的转置 (1 x 3)
     Eigen::MatrixXd Y(data.size(), 3);
     for (int i = 0; i < data.size(); ++i) {
         Y.row(i) = (data[i] - origin).transpose();
     }
 
-    Eigen::JacobiSVD svd(Y, Eigen::ComputeFullV);
-    dir = svd.matrixV().col(0);
+    // 4. 对矩阵 Y 进行 SVD 分解
+    //    Eigen::ComputeFullV: 计算完整的 V 矩阵 (对于 3x3 来说，就是 V 本身)
+    //    (注：这里用 FullV 而不是 ThinV，因为 Y 是 N x 3，FullV 会生成 3x3 的 V，ThinV 也会是 3x3，效果一样，但 FullV 更明确)
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(Y, Eigen::ComputeFullV);
+    
+    // 5. 获取 V 矩阵
+    //    V 是一个 3x3 矩阵，其列向量是 Y^T * Y 的特征向量
+    //    由于 SVD 按奇异值降序排列，V 的第一列 (col(0)) 对应最大奇异值，
+    //    也就是数据分布最分散的方向，即直线的方向 dir。
+    dir = svd.matrixV().col(0); // 将 V 的第 0 列 (最大奇异值对应的特征向量) 作为直线方向
 
-    // check eps
-    for (const auto& d : data) {
+   // 6. 检查拟合误差 eps
+    //    计算每个点到拟合直线的距离，并判断是否小于阈值 eps
+    for (const auto& d : data) { // 遍历所有数据点 d
+        // 计算点 d 到直线 (origin, dir) 的距离
+        // 点到直线的距离公式 (在3D中) 是：|| (d - origin) x dir || / ||dir||
+        // 但这里 dir 是由 SVD 得到的，SVD 保证了 V 的列向量是单位向量，所以 ||dir|| == 1
+        // 因此，距离简化为 || (d - origin) x dir ||
+        // 代码中计算的是距离的平方：|| (d - origin) x dir ||^2
+        // cross(...) 是叉积，squaredNorm() 是向量模长的平方
         if (dir.template cross(d - origin).template squaredNorm() > eps) {
             return false;
         }
