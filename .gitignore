@@ -114,3 +114,6 @@ data/ch3/state.txt
 data/ch3/gins.txt
 data/ch3/gnss_output.txt
 data/ch4/gins_preintg.txt
+node_modules/**
+package.json
+package-lock.json

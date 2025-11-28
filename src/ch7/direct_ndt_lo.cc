@@ -11,6 +11,7 @@
 namespace sad {
 
 void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
+    // 第一帧添加到局部地图，然后开始建立体素
     if (local_map_ == nullptr) {
         // 第一个帧，直接加入local map
         local_map_.reset(new PointCloudType);
@@ -22,17 +23,20 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
         if (options_.use_pcl_ndt_) {
             ndt_pcl_.setInputTarget(local_map_);
         } else {
-            ndt_.SetTarget(local_map_);
+            ndt_.SetTarget(local_map_);  // 建立体素
         }
 
         return;
     }
 
     // 计算scan相对于local map的位姿
+    // 这里的得到的是相对于起始点的位姿，也就是世界坐标系下的位置
     pose = AlignWithLocalMap(scan);
     CloudPtr scan_world(new PointCloudType);
+    // 利用和全局地图配准得到的pose，将scan转换到scan_world，也就是世界坐标系下面去
     pcl::transformPointCloud(*scan, *scan_world, pose.matrix().cast<float>());
 
+    // 只选择相关的关键帧拼接为局部地图
     if (IsKeyframe(pose)) {
         last_kf_pose_ = pose;
 
@@ -61,9 +65,9 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
 
 bool DirectNDTLO::IsKeyframe(const SE3& current_pose) {
     // 只要与上一帧相对运动超过一定距离或角度，就记关键帧
-    SE3 delta = last_kf_pose_.inverse() * current_pose;
-    return delta.translation().norm() > options_.kf_distance_ ||
-           delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD;
+    SE3 delta = last_kf_pose_.inverse() * current_pose;                        // ??? 这个是为什么？为什么这么书写？
+    return delta.translation().norm() > options_.kf_distance_ ||               // norm() 是二范数，平移的范围
+           delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; // so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度
 }
 
 SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
@@ -77,6 +81,7 @@ SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
 
     SE3 guess;
     bool align_success = true;
+    // 前两帧之间的位置
     if (estimated_poses_.size() < 2) {
         if (options_.use_pcl_ndt_) {
             ndt_pcl_.align(*output, guess.matrix().cast<float>());
@@ -86,6 +91,7 @@ SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
         }
     } else {
         // 从最近两个pose来推断
+        // 利用恒速模型估计现在这个时刻的状态，将估计得到的状态传递给ndt，作为初值
         SE3 T1 = estimated_poses_[estimated_poses_.size() - 1];
         SE3 T2 = estimated_poses_[estimated_poses_.size() - 2];
         guess = T1 * (T2.inverse() * T1);
@@ -94,12 +100,17 @@ SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
             ndt_pcl_.align(*output, guess.matrix().cast<float>());
             guess = Mat4ToSE3(ndt_pcl_.getFinalTransformation().cast<double>().eval());
         } else {
-            align_success = ndt_.AlignNdt(guess);
+            align_success = ndt_.AlignNdt(guess);   // 将target和source匹配，初值为guess
         }
     }
 
-    LOG(INFO) << "pose: " << guess.translation().transpose() << ", "
-              << guess.so3().unit_quaternion().coeffs().transpose();
+    // pose: [x y z], [qx qy qz qw]
+    LOG(INFO) << "pose: " << guess.translation().transpose() << ", "    // 平移的xyz
+              << guess.so3().unit_quaternion().coeffs().transpose();    
+              // so3()旋转李代数
+              // unit_quaternion()然后转为单位四元数，
+              // coeffs()之后再获取，
+              // transpose()最后转置输出
 
     if (options_.use_pcl_ndt_) {
         LOG(INFO) << "trans prob: " << ndt_pcl_.getTransformationProbability();

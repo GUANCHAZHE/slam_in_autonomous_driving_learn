@@ -18,9 +18,12 @@ void Ndt3d::BuildVoxels() {
     grids_.clear();
 
     /// 分配体素
+    // 得到索引表 [0, 1, 2, ... , N-1]
     std::vector<size_t> index(target_->size());
     std::for_each(index.begin(), index.end(), [idx = 0](size_t& i) mutable { i = idx++; });
 
+    // 将点云映射到Voxel 格子
+    // 得到grid
     std::for_each(index.begin(), index.end(), [this](const size_t& idx) {
         Vec3d pt = ToVec3d(target_->points[idx]) * options_.inv_voxel_size_;
         auto key = CastToInt(pt);
@@ -35,10 +38,11 @@ void Ndt3d::BuildVoxels() {
     std::for_each(std::execution::par_unseq, grids_.begin(), grids_.end(), [this](auto& v) {
         if (v.second.idx_.size() > options_.min_pts_in_voxel_) {
             // 要求至少有３个点
+            // 这里的lambda表达式传递的是具体的点云数值而非索引
             math::ComputeMeanAndCov(v.second.idx_, v.second.mu_, v.second.sigma_,
                                     [this](const size_t& idx) { return ToVec3d(target_->points[idx]); });
-            // SVD 检查最大与最小奇异值，限制最小奇异值
 
+            // SVD 检查最大与最小奇异值，限制最小奇异值
             Eigen::JacobiSVD svd(v.second.sigma_, Eigen::ComputeFullU | Eigen::ComputeFullV);
             Vec3d lambda = svd.singularValues();
             if (lambda[1] < lambda[0] * 1e-3) {
@@ -49,9 +53,9 @@ void Ndt3d::BuildVoxels() {
                 lambda[2] = lambda[0] * 1e-3;
             }
 
-            Mat3d inv_lambda = Vec3d(1.0 / lambda[0], 1.0 / lambda[1], 1.0 / lambda[2]).asDiagonal();
+            Mat3d inv_lambda = Vec3d(1.0 / lambda[0], 1.0 / lambda[1], 1.0 / lambda[2]).asDiagonal();  // ???
 
-            // v.second.info_ = (v.second.sigma_ + Mat3d::Identity() * 1e-3).inverse();  // 避免出nan
+            // v.second.info_ = (v.second.sigma_ + Mat3d::Identity() * 1e-3).inverse();  // 避免出nan ???
             v.second.info_ = svd.matrixV() * inv_lambda * svd.matrixU().transpose();
         }
     });
@@ -114,7 +118,7 @@ bool Ndt3d::AlignNdt(SE3& init_pose) {
                     Vec3d e = qs - v.mu_;
 
                     // check chi2 th
-                    double res = e.transpose() * v.info_ * e;
+                    double res = e.transpose() * v.info_ * e;                  // 7.13
                     if (std::isnan(res) || res > options_.res_outlier_th_) {
                         effect_pts[real_idx] = false;
                         continue;
@@ -122,8 +126,8 @@ bool Ndt3d::AlignNdt(SE3& init_pose) {
 
                     // build residual
                     Eigen::Matrix<double, 3, 6> J;
-                    J.block<3, 3>(0, 0) = -pose.so3().matrix() * SO3::hat(q);
-                    J.block<3, 3>(0, 3) = Mat3d::Identity();
+                    J.block<3, 3>(0, 0) = -pose.so3().matrix() * SO3::hat(q);  // 7.16
+                    J.block<3, 3>(0, 3) = Mat3d::Identity();                   // 7.16
 
                     jacobians[real_idx] = J;
                     errors[real_idx] = e;
