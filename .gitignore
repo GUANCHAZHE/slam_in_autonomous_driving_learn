@@ -117,3 +117,4 @@ data/ch4/gins_preintg.txt
 node_modules/**
 package.json
 package-lock.json
+dataset/*

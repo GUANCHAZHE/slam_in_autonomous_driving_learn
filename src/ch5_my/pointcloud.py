@@ -13,8 +13,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 
-default_pcd_path = './data/ch5/map_example.pcd'
-
+# default_pcd_path = './data/ch5/map_example.pcd'
+default_pcd_path = './data/ch5/first.pcd'
 
 class PointCloudProcessor:
     """点云处理器，封装常用的点云 -> 图像 / 最近邻等方法，便于测试与复用。
@@ -161,7 +161,7 @@ class PointCloudProcessor:
 
         return matches
 
-    def load_and_vis_pcd(self, pcd_path, is_vis=False):
+    def load_and_vis_pcd(self, pcd_path, is_vis=True):
         """加载点云并可选可视化，返回 (cloud, points_np)。"""
         cloud = o3d.io.read_point_cloud(pcd_path)
         print(f"点云点数: {len(cloud.points)}")
@@ -169,6 +169,50 @@ class PointCloudProcessor:
             o3d.visualization.draw_geometries([cloud])
         cloud_points_np = np.asarray(cloud.points)
         return cloud, cloud_points_np
+
+    def voxelize_pcd(self, pcd, voxel_size=0.1):
+        """使用 Open3D 体素化点云"""
+        voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud(pcd, voxel_size=voxel_size)
+        
+        # 获取体素中心点（近似代表点）
+        voxels = voxel_grid.get_voxels()
+        points = []
+        for voxel in voxels:
+            pt = voxel_grid.get_voxel_center_coordinate(voxel.grid_index)
+            points.append(pt)
+        voxel_pcd = o3d.geometry.PointCloud()
+        voxel_pcd.points = o3d.utility.Vector3dVector(np.asarray(points))
+
+        return voxel_pcd, voxel_grid
+
+
+    def visualize_voxel_and_original(self, original_pcd, voxel_size=0.1):
+        voxel_pcd, voxel_grid = self.voxelize_pcd(original_pcd, voxel_size)
+
+        # 可视化：原始点云（灰色）+ 体素（彩色）
+        original_pcd.paint_uniform_color([0.8, 0.8, 0.8])  # 灰色
+        voxel_pcd.paint_uniform_color([1, 0, 0])           # 红色
+
+        # o3d.visualization.draw_geometries([original_pcd, voxel_pcd], window_name="Original vs Voxelized")
+
+        # 或直接显示体素网格（带立方体）
+        # o3d.visualization.draw_geometries([voxel_grid], window_name="Voxel Grid (with cubes)")
+
+    def test_voxel_vs_original(self, pcd_path=default_pcd_path):
+        cloud, points_np = self.load_and_vis_pcd(pcd_path, is_vis=False)
+        
+        # 体素化
+        voxel_pcd, voxel_grid = self.voxelize_pcd(cloud, voxel_size=0.1)
+        
+        # 可视化网格（带立方体）
+        print("显示体素网格（带立方体）...")
+        # o3d.visualization.draw_geometries([voxel_grid])
+        
+        # 可视化点对比
+        cloud.paint_uniform_color([0.7, 0.7, 0.7])
+        voxel_pcd.paint_uniform_color([1, 0, 0])
+        print("显示原始点云（灰） vs 体素中心点（红）...")
+        o3d.visualization.draw_geometries([cloud, voxel_pcd])
 
     # 将原有测试函数改为方法，便于在单元测试中调用
     def test_bfnn_cloud(self):
@@ -222,6 +266,8 @@ def main():
     # 示例：若需要生成鸟瞰图或 range image，可取消下面注释
     # processor.pcd_to_bird(cloud_points_np)
     # processor.scan_to_range_image(cloud_points_np)
+    processor.test_voxel_vs_original()
+    # 测试代码
 
 
 if __name__ == "__main__":

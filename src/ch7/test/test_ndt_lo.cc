@@ -15,10 +15,14 @@
 /// 测试以NDT为主的Lidar Odometry
 /// 若使用PCL NDT的话，会重新建立NDT树
 DEFINE_string(bag_path, "./dataset/sad/ulhk/test2.bag", "path to rosbag");
-DEFINE_string(dataset_type, "ULHK", "NCLT/ULHK/KITTI/WXB_3D");  // 数据集类型
+DEFINE_string(dataset_type, "ULHK", "NCLT/ULHK/KITTI/WXB_3D");              // 数据集类型
 DEFINE_bool(use_pcl_ndt, false, "use pcl ndt to align?");
 DEFINE_bool(use_ndt_nearby_6, false, "use ndt nearby 6?");
 DEFINE_bool(display_map, true, "display map?");
+DEFINE_double(voxel_size, 1.0, "voxel_size");                               // 体素大小 单位m
+DEFINE_double(kf_distance, 0.5, "keyframe_distance m");                     // 关键帧的距离判断阈值
+DEFINE_double(kf_angle_deg, 30.0, "keyframe_angle_deg");                    // 关键帧角度判断阈值
+
 
 int main(int argc, char** argv) {
     google::InitGoogleLogging(argv[0]);
@@ -29,6 +33,13 @@ int main(int argc, char** argv) {
     sad::RosbagIO rosbag_io(fLS::FLAGS_bag_path, sad::Str2DatasetType(FLAGS_dataset_type));
 
     sad::DirectNDTLO::Options options;
+    // 点云的配置
+    options.ndt3d_options_.voxel_size_ = fLD::FLAGS_voxel_size;
+
+    // 配准的详细参数
+    options.kf_distance_ = fLD::FLAGS_kf_distance;    // 关键帧的距离
+    options.kf_angle_deg_ = fLD::FLAGS_kf_angle_deg;  // 关键帧的距离
+
     options.use_pcl_ndt_ = fLB::FLAGS_use_pcl_ndt;
     options.ndt3d_options_.nearby_type_ =
         FLAGS_use_ndt_nearby_6 ? sad::Ndt3d::NearbyType::NEARBY6 : sad::Ndt3d::NearbyType::CENTER;

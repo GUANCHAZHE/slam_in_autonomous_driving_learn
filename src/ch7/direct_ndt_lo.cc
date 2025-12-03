@@ -65,7 +65,12 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
 
 bool DirectNDTLO::IsKeyframe(const SE3& current_pose) {
     // 只要与上一帧相对运动超过一定距离或角度，就记关键帧
-    SE3 delta = last_kf_pose_.inverse() * current_pose;                        // ??? 这个是为什么？为什么这么书写？
+    // 假设当前的位置P1w P2w，从1移动到2的变换为 T21
+    // T21 * P1w = P2w  位置的增量也就是状态的变换
+    // T21 = P2w * P1w^-1
+    // T12^-1 = T12^T = P1w^-1 * P2w 得到如下结果
+    //  其实反向也没有太大的问题，我们需要的模长和角度都是相同的
+    SE3 delta = last_kf_pose_.inverse() * current_pose;
     return delta.translation().norm() > options_.kf_distance_ ||               // norm() 是二范数，平移的范围
            delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; // so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度
 }
@@ -92,8 +97,11 @@ SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
     } else {
         // 从最近两个pose来推断
         // 利用恒速模型估计现在这个时刻的状态，将估计得到的状态传递给ndt，作为初值
+        // T2 ----> T1 ----> T3?
         SE3 T1 = estimated_poses_[estimated_poses_.size() - 1];
         SE3 T2 = estimated_poses_[estimated_poses_.size() - 2];
+        // 位移增量 Δ = T2^{-1} T1
+        // 按恒速预测 T3 = T1 * Δ   将Δ 视为点
         guess = T1 * (T2.inverse() * T1);
 
         if (options_.use_pcl_ndt_) {

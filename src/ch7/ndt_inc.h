@@ -111,7 +111,7 @@ class IncNdt3d {
     Options options_;
 
     using KeyAndData = std::pair<KeyType, VoxelData>;  // 预定义
-    std::list<KeyAndData> data_;                       // 真实数据，会缓存，也会清理
+    std::list<KeyAndData> data_;                       // 真实数据，会缓存，也会清理 LRU模型
     std::unordered_map<KeyType, std::list<KeyAndData>::iterator, hash_vec<3>> grids_;  // 栅格数据，存储真实数据的迭代器
     std::vector<KeyType> nearby_grids_;                                                // 附近的栅格
 
@@ -120,4 +120,4 @@ class IncNdt3d {
 
 }  // namespace sad
 
-#endif  // SLAM_IN_AUTO_DRIVING_NDT_INC_H
+#endif  // SLAM_IN_AUTO_DRIVING_NDT_INC_reloadH
