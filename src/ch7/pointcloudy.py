@@ -6,7 +6,7 @@ import sensor_msgs.point_cloud2 as pc2
 import os
 import glob
 import copy  # 用于深拷贝，防止修改原始数据
-
+import sophuspy as sp
 
 class PointCloudPlayer:
     """点云加载、播放和配准工具类"""
@@ -24,10 +24,32 @@ class PointCloudPlayer:
         self.bag_path = bag_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/test2.bag"
         self.topic_name = topic_name or "/velodyne_points_0"
         self.all_frames = []
+        self.map = []
+        self.source = []
+        self.target = []
+        self.last_kf_pose_ = sp.SE3()
+        self.estimated_pose = []
+        self.kf_distance_ = 0.5
+        self.kf_angle_deg_ = 10.0
 
     @staticmethod
     def numpy_to_o3d(points_np):
-        """将 Numpy (N,3) 转为 Open3D PointCloud"""
+        """
+        将 Numpy 数组转换为 Open3D 点云对象
+        
+        功能说明：
+        将形状为 (N, 3) 的 NumPy 数组转换为 Open3D 的 PointCloud 对象，
+        用于后续的点云处理、可视化和配准操作。
+        
+        参数：
+            points_np: numpy.ndarray
+                输入的点云数据，形状为 (N, 3)，其中 N 是点的数量，
+                每一行包含一个点的 [x, y, z] 坐标
+                
+        返回：
+            pcd: o3d.geometry.PointCloud
+                Open3D 点云对象，包含输入的所有点坐标
+        """
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points_np)
         return pcd
@@ -172,7 +194,7 @@ class PointCloudPlayer:
         bag.close()
 
     @staticmethod
-    def icp_registration(source, target, voxel_size=1.0):
+    def icp_registration(source, target, voxel_size=1.0, init_guess=None):
         """
         执行 ICP 点云配准
         
@@ -180,6 +202,7 @@ class PointCloudPlayer:
             source: 输入点云 (o3d.geometry.PointCloud)
             target: 地图/目标点云 (o3d.geometry.PointCloud)
             voxel_size: 体素大小（越大越稳，越小越精细）
+            init_guess: 初始变换估计，如果为 None 则使用单位矩阵
             
         Returns:
             配准结果对象
@@ -188,8 +211,9 @@ class PointCloudPlayer:
         source_down = source.voxel_down_sample(voxel_size)
         target_down = target.voxel_down_sample(voxel_size)
 
-        # 设置初始估计
-        init_guess = np.eye(4)
+        # 设置初始估计 - 只有在没有传入参数时才使用默认值
+        if init_guess is None:
+            init_guess = np.eye(4)
 
         # 设置 ICP 参数
         criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
@@ -274,11 +298,53 @@ class PointCloudPlayer:
 
         return result
 
-    def icp_lo(self, ky_distance = 0.5, ky_angel = 30):
-        # 整体的逻辑为
-        # 实时计算当前帧和上一帧的之间的icp结果T
-        # 将当前帧的点云变换到世界坐标系下，
-        # 如果是关键帧将当前帧的世界坐标系和上一帧拼接起来，得到全局的地图
+
+
+
+    def Is_keyframe(self, current_pose):
+        # 只要与上一帧相对运动超过一定距离或角度，就记关键帧
+        # 假设当前的位置P1w P2w，从1移动到2的变换为 T21
+        # T21 * P1w = P2w  位置的增量也就是状态的变换
+        # T21 = P2w * P1w^-1
+        # T12^-1 = T12^T = P1w^-1 * P2w 得到如下结果
+        #  其实反向也没有太大的问题，我们需要的模长和角度都是相同的
+        delta = self.last_kf_pose_.inverse() * current_pose
+        
+        # # norm() 是二范数，平移的范围
+        # return delta.translation().norm() > self.kf_distance_ or              
+        #     # so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度   
+        #     delta.so3().log().norm() > self.kf_angel_ * np.pi / 180 
+
+
+
+    def icp_lo(self, scan, pose):
+    #     # 整体的逻辑为
+    #     # 实时计算当前帧和上一帧的之间的icp结果T
+    #     # 将当前帧的点云变换到世界坐标系下，
+    #     # 如果是关键帧将当前帧的世界坐标系和上一帧拼接起来，得到全局的地图
+        
+        # 初始化 地图，source，target，last_kf_pose_
+
+        if len(self.map) == 0:
+            self.map.append(self.numpy_to_o3d(self.all_frames[0]))
+            self.last_kf_pose_ = sp.SE3()
+
+            self.source.append(self.numpy_to_o3d(self.all_frames[0]))
+            self.target.append(self.numpy_to_o3d(self.all_frames[1]))
+            return
+
+        pose = self.icp_registration(self.source[-1], self.target[-1])
+        
+        # 添加到 相关的关键帧
+        self.estimate_pose.append(pose)  
+        T = pose.transformation
+        # 提取旋转矩阵 R (前3行，前3列)
+        R = T[:3, :3]
+        # 提取平移向量 t (前3行，第4列)
+        t = T[:3, 3]
+
+        
+
 def main():
     """主函数"""
     # 创建点云播放器实例
@@ -298,4 +364,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # print(np.eye(4))
+    # print(sp.SE3())
     

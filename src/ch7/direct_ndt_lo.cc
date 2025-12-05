@@ -71,8 +71,11 @@ bool DirectNDTLO::IsKeyframe(const SE3& current_pose) {
     // T12^-1 = T12^T = P1w^-1 * P2w 得到如下结果
     //  其实反向也没有太大的问题，我们需要的模长和角度都是相同的
     SE3 delta = last_kf_pose_.inverse() * current_pose;
-    return delta.translation().norm() > options_.kf_distance_ ||               // norm() 是二范数，平移的范围
-           delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; // so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度
+    
+    // norm() 是二范数，平移的范围
+    return delta.translation().norm() > options_.kf_distance_ ||              
+        // so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度   
+        delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; 
 }
 
 SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
