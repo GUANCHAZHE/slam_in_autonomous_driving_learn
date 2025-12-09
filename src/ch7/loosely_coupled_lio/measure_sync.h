@@ -64,6 +64,7 @@ class MessageSync {
         time_buffer_.push_back(msg->header.stamp.toSec());
         last_timestamp_lidar_ = msg->header.stamp.toSec();
 
+        // 尝试同步IMU与激光数据
         Sync();
     }
 

@@ -1,4 +1,5 @@
 import time
+from cv2 import merge
 import open3d as o3d
 import numpy as np
 import rosbag
@@ -7,6 +8,10 @@ import os
 import glob
 import copy  # 用于深拷贝，防止修改原始数据
 import sophuspy as sp
+from scipy.spatial.transform import Rotation as Rscipy  # 你前面已经导入过
+
+# 顶部添加：
+from scipy.spatial.transform import Rotation as R_scipy
 
 class PointCloudPlayer:
     """点云加载、播放和配准工具类"""
@@ -24,13 +29,16 @@ class PointCloudPlayer:
         self.bag_path = bag_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/test2.bag"
         self.topic_name = topic_name or "/velodyne_points_0"
         self.all_frames = []
-        self.map = []
-        self.source = []
-        self.target = []
-        self.last_kf_pose_ = sp.SE3()
+        self.scan_world = []
+
+        self.map = o3d.geometry.PointCloud()
+        self.source = o3d.geometry.PointCloud()
+        self.target = o3d.geometry.PointCloud()
+
+        self.last_kf_pose_ = np.eye(4)
         self.estimated_pose = []
-        self.kf_distance_ = 0.5
-        self.kf_angle_deg_ = 10.0
+        self.kf_distance_ = 0.5     # 关键帧距离阈值（米）
+        self.kf_angle_deg_ = 10.0   # 关键帧角度阈值（度）
 
     @staticmethod
     def numpy_to_o3d(points_np):
@@ -53,6 +61,11 @@ class PointCloudPlayer:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points_np)
         return pcd
+
+    def matrix_to_norm_angle(R):
+        trace = np.trace(R)
+        angle = np.arccos((trace - 1) / 2)
+        return angle
 
     def load_all_frame_npy(self, frame_path=None):
         """
@@ -110,6 +123,7 @@ class PointCloudPlayer:
         vis.reset_view_point(True)
 
         for i in range(len(all_frames)):
+            print(f"当前的播放帧 frame: {i}")
             # 更新数据
             points = all_frames[i]
             pcd.points = o3d.utility.Vector3dVector(points)
@@ -232,7 +246,7 @@ class PointCloudPlayer:
 
         return result
 
-    def test_icp_registration(self, all_frames=None, voxel_size=0.5):
+    def test_icp_registration(self, all_frames=None, voxel_size=0.1):
         """
         测试 ICP 配准功能
         
@@ -253,44 +267,89 @@ class PointCloudPlayer:
         print("Converting numpy to Open3D format...")
 
         # 取出第0帧和第1帧，并转化为 Open3D 对象
-        source = self.numpy_to_o3d(all_frames[0])
-        target = self.numpy_to_o3d(all_frames[1])
+        frame1_pcd = self.numpy_to_o3d(all_frames[900])
+        frame2_pcd = self.numpy_to_o3d(all_frames[910])
+        frame3_pcd = self.numpy_to_o3d(all_frames[915])
+        source = self.numpy_to_o3d(all_frames[925])
+        target = self.numpy_to_o3d(all_frames[900])
 
-        # 为了可视化效果明显，先给点云上色
-        source.paint_uniform_color([1, 0.706, 0])  # 黄色
-        target.paint_uniform_color([0, 0.651, 0.929])  # 蓝色
+        # 900 到 0 的变换
+        result1 = self.icp_registration(frame2_pcd, frame1_pcd, voxel_size=voxel_size)
+        pose1900_0 = result1.transformation
+        print(f"pose1900_0:\n{pose1900_0}")
+        frame2_world = copy.deepcopy(frame2_pcd)     # 这里需要深拷贝
+        frame2_world = frame2_world.transform(pose1900_0)
+        
+        # 925 到 900 的变换
+        result2 = self.icp_registration(frame3_pcd, frame2_pcd, voxel_size=voxel_size)
+        pose3925_900 = result2.transformation
+        print(f"pose3925_900:\n{pose3925_900}")
+        
+        # 得到 925 相对于 0 的变换
+        T_925_0 = pose1900_0 @ pose3925_900
+        frame3_world = copy.deepcopy(frame3_pcd)     # 这里需要深拷贝
+        frame3_world = frame3_world.transform(T_925_0)
+
+        # map_all = frame2_world + frame3_world + frame1_pcd
 
         print("Starting ICP registration...")
         # 调用配准函数
         result = self.icp_registration(source, target, voxel_size=voxel_size)
-        T = result.transformation
+        # result = self.icp_registration(target, source, voxel_size=voxel_size)
+        # print(f"ICP Result: {result}")
 
+        pose = result.transformation
+        print(f"pose:\n{pose}")
+        
         # 提取旋转矩阵 R (前3行，前3列)
-        R = T[:3, :3]
+        R = pose[:3, :3]
         # 提取平移向量 t (前3行，第4列)
-        t = T[:3, 3]
+        t = pose[:3, 3]
 
-        print("\nTransformation Matrix (4x4):")
-        print(result.transformation)
-        print("\n--- SE3 Components ---")
-        print("Rotation Matrix (R):\n", R)
-        print("Translation Vector (t):\n", t)
-        print(f"Fitness 重叠度: {result.fitness}, RMSE 均方根误差: {result.inlier_rmse}")
+        print(f"Rotation Matrix (R):\n{R}")
+        print(f"Translation Vector (t):\n{t}")
 
-        # 可视化
-        # 将 source 点云变换到 target 坐标系下
+
+        ######  测试代码
+        T_test = np.eye(4)
+        t_offset_test = np.array([0, 0, 3])
+        T_test[:3, :3] = R
+        print(f"T_test:\n{T_test}")
         source_trans = copy.deepcopy(source)
-        source_trans.transform(result.transformation)
+        source_trans.transform(T_test)
+
+        # # 将 source 点云变换到 target 坐标系下
+        # source_trans = copy.deepcopy(source)
+        # source_trans.transform(pose)
 
         # 变换后的设为红色，目标设为绿色
-        source_trans.paint_uniform_color([1, 0, 0])
-        target.paint_uniform_color([0, 1, 0])
+
+        # 为了可视化效果明显，先给点云上色
+        source.paint_uniform_color([1, 0, 0])  # 红色
+        target.paint_uniform_color([0, 0, 1])  # 蓝色
+        source_trans.paint_uniform_color([0, 1, 0])   # 绿色
+
+        frame1_pcd.paint_uniform_color([1, 0, 0])  # 红色
+        frame2_pcd.paint_uniform_color([0, 0, 1])  # 蓝色
+        frame2_world.paint_uniform_color([0, 0, 1])  # 蓝色
+        frame3_pcd.paint_uniform_color([0, 1, 0])   # 绿色
+        frame3_world.paint_uniform_color([0, 1, 0])   # 绿色
 
         # 创建坐标轴看原点
         axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
 
+        # mergeed_pcd = target + source_trans
+
         o3d.visualization.draw_geometries(
-            [source_trans, target, axis],
+            [frame1_pcd, frame2_pcd, axis],
+            # [frame1_pcd , frame2_world, frame3_world, axis],
+            # [map_all, axis],
+            # [source, axis],
+            # [target, source, axis],
+            # [source_trans, source, axis],
+            # [source_trans, target, axis],
+            # [source_trans, target, source, axis],
+            # [mergeed_pcd, axis],
             window_name="ICP Registration Result",
             width=800,
             height=600
@@ -301,49 +360,136 @@ class PointCloudPlayer:
 
 
 
-    def Is_keyframe(self, current_pose):
-        # 只要与上一帧相对运动超过一定距离或角度，就记关键帧
-        # 假设当前的位置P1w P2w，从1移动到2的变换为 T21
-        # T21 * P1w = P2w  位置的增量也就是状态的变换
-        # T21 = P2w * P1w^-1
-        # T12^-1 = T12^T = P1w^-1 * P2w 得到如下结果
-        #  其实反向也没有太大的问题，我们需要的模长和角度都是相同的
-        delta = self.last_kf_pose_.inverse() * current_pose
+    # 输入的scan 为当前帧的点云
+    # 输入的pose 为当前帧的位姿
+    def icp_lo(self, scan):
+        """
+        执行 ICP 里程计，并将结果转换为 SE3 格式
         
-        # # norm() 是二范数，平移的范围
-        # return delta.translation().norm() > self.kf_distance_ or              
-        #     # so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度   
-        #     delta.so3().log().norm() > self.kf_angel_ * np.pi / 180 
+        Args:
+            scan: 当前帧的点云 (Open3D PointCloud 对象)
+        """
+        # 初始化地图
+        if len(self.map.points) == 0:
+            self.map += scan
+            print(f"初始化 map 点云数量: {len(self.map.points)}")
 
-
-
-    def icp_lo(self, scan, pose):
-    #     # 整体的逻辑为
-    #     # 实时计算当前帧和上一帧的之间的icp结果T
-    #     # 将当前帧的点云变换到世界坐标系下，
-    #     # 如果是关键帧将当前帧的世界坐标系和上一帧拼接起来，得到全局的地图
-        
-        # 初始化 地图，source，target，last_kf_pose_
-
-        if len(self.map) == 0:
-            self.map.append(self.numpy_to_o3d(self.all_frames[0]))
-            self.last_kf_pose_ = sp.SE3()
-
-            self.source.append(self.numpy_to_o3d(self.all_frames[0]))
-            self.target.append(self.numpy_to_o3d(self.all_frames[1]))
+            self.last_kf_pose_ = np.eye(4)
+            self.target = scan
             return
 
-        pose = self.icp_registration(self.source[-1], self.target[-1])
+        self.source = scan
+        # 实时计算当前帧和上一帧的之间的 ICP 结果
+        result = self.icp_registration(self.source, self.target)
         
-        # 添加到 相关的关键帧
-        self.estimate_pose.append(pose)  
-        T = pose.transformation
-        # 提取旋转矩阵 R (前3行，前3列)
-        R = T[:3, :3]
-        # 提取平移向量 t (前3行，第4列)
-        t = T[:3, 3]
+        # 从结果中提取变换矩阵 T (4x4)
+        pose_matrix = result.transformation
+        
+        # 把当前帧的点云变换到世界坐标系下
+        scan_world = scan.transform(pose_matrix)
+        
+        # 添加到队列
+        self.scan_world.append(scan_world)
+        self.estimated_pose.append(pose_matrix)  # 存储 SE3 对象而不是矩阵
 
-        
+        if self.Is_keyframe(pose_matrix):
+            
+            self.last_kf_pose_ = pose_matrix
+            self.target = scan
+
+            # 把当前帧的点云添加到地图中
+            self.map += scan_world
+            print(f"当前地图点云数量: {len(self.map.points)}")
+
+
+
+    # def Is_keyframe(self, current_pose):
+
+    #     delta = np.linalg.inv(self.last_kf_pose_) @ current_pose
+    #     print(f"delta:\n{delta}")
+
+    #     R_deta = delta[:3, :3]
+    #     t_deta = delta[:3, 3]
+    #     # 计算旋转角度
+    #     rotation_angle_rad = np.linalg.norm(R_deta)
+    #     rotation_angle_deg = np.degrees(rotation_angle_rad)
+    #     print(f"rotation_angle_deg: {rotation_angle_deg}")
+    #     # 计算平移距离
+    #     translation_distance = np.linalg.norm(t_deta)
+    #     print(f"translation_distance: {translation_distance}")
+    #     # 判断是否为关键帧
+    #     return rotation_angle_deg > self.kf_angle_deg_ or translation_distance > self.kf_distance_
+
+    def Is_keyframe(self, current_pose):
+            
+            delta = np.linalg.inv(self.last_kf_pose_) @ current_pose
+            print(f"delta:\n{delta}")
+            R_deta = delta[:3, :3]
+            print(f"R_deta:\n{R_deta}")
+            t_deta = delta[:3, 3]
+            print(f"t_deta:\n{t_deta}")
+            
+            # 核心修复 2：使用 scipy 库将旋转矩阵 R_deta 转换为旋转向量，再求模长 (即弧度)
+            try:
+                # R_scipy.from_matrix(R_deta).as_rotvec() 得到旋转向量
+                rotation_vector = R_scipy.from_matrix(R_deta).as_rotvec()
+                rotation_angle_rad = np.linalg.norm(rotation_vector)
+                rotation_angle_deg = np.degrees(rotation_angle_rad)
+            except ValueError:
+                # 捕获无效旋转矩阵的异常
+                print("警告: 相对旋转矩阵无效，跳过旋转检查。")
+                rotation_angle_deg = 0.0
+
+            print(f"rotation_angle_deg: {rotation_angle_deg:.6f}")
+            
+            # 计算平移距离
+            translation_distance = np.linalg.norm(t_deta)
+            print(f"translation_distance: {translation_distance:.6f}")
+            
+            # 判断是否为关键帧
+            return rotation_angle_deg > self.kf_angle_deg_ or translation_distance > self.kf_distance_
+
+    def show_frame(self, frame):
+        # 显示当前frame的点云
+        frame_pcd = self.numpy_to_o3d(frame)
+        print(f"frame_pcd 点云数量: {len(frame_pcd.points)}")
+        o3d.visualization.draw_geometries([frame_pcd])
+
+
+
+    def test_cloud_merge(self):
+        fram1 = self.all_frames[0]
+        fram2 = self.all_frames[1000]
+
+        fram1_pcd = self.numpy_to_o3d(fram1)
+        fram2_pcd = self.numpy_to_o3d(fram2)
+        fram1_pcd.paint_uniform_color([1, 0, 0])  # 红色
+        fram2_pcd.paint_uniform_color([0, 0, 1])  # 蓝色
+
+        print(f"fram1_pcd 点云数量: {len(fram1_pcd.points)}")
+        print(f"fram2_pcd 点云数量: {len(fram2_pcd.points)}")
+
+
+        # 合并点云
+        merged_pcd = fram1_pcd + fram2_pcd
+        # 添加一个小的偏移
+        offset_vector = np.array([0.1, 0.1, 0.1])
+        merged_pcd.translate(offset_vector)
+        merged_pcd.paint_uniform_color([0, 1, 0])  # 绿色
+        print(f"merged_pcd 点云数量: {len(merged_pcd.points)}")
+
+        axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0, origin=[0, 0, 0])
+
+        o3d.visualization.draw_geometries(
+            [fram1_pcd, fram2_pcd, merged_pcd, axis],
+            window_name="Cloud Merge Result",
+            width=800,
+            height=600
+        )
+
+    # def test_key_frame(self, frame):
+        # 检查关键帧的判断依据
+
 
 def main():
     """主函数"""
@@ -353,17 +499,23 @@ def main():
     # 从文件中读取点云帧
     player.load_all_frame_npy()
 
+    # player.show_frame(player.all_frames[0])
+
+
     # 播放点云序列
-    player.play_pointcloud_sequence_npy()
+    # player.play_pointcloud_sequence_npy()
 
     # 或执行 ICP 配准测试
-    # player.test_icp_registration()
+    player.test_icp_registration()
+
+    # 测试点云合并
+    # player.test_cloud_merge()
+
+    # 继续开始相关的lo的书写
+    # player.icp_lo(player.all_frames[0], np.eye(4))
 
     print("操作完成")
 
 
 if __name__ == "__main__":
     main()
-    # print(np.eye(4))
-    # print(sp.SE3())
-    

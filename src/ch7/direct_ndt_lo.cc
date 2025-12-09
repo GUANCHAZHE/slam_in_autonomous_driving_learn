@@ -32,12 +32,35 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
     // 计算scan相对于local map的位姿
     // 这里的得到的是相对于起始点的位姿，也就是世界坐标系下的位置
     pose = AlignWithLocalMap(scan);
+    
+    // 显示当前的估计的pose
+    Eigen::Vector3d t = pose.translation();
+    Eigen::Matrix3d R = pose.rotationMatrix();
+    Eigen::Vector3d euler = R.eulerAngles(0, 1, 2);
+    std::cout << "--------- SE3f/SE3d 打印 --------- \n";
+    std::cout << "平移 t = " << t.transpose() << "\n";
+    std::cout << "旋转矩阵 R = \n" << R << "\n";
+    std::cout << "欧拉角(rad) roll-pitch-yaw = " << euler.transpose() << "\n";
+    std::cout << "欧拉角(deg)                = " << (euler * 180 / M_PI).transpose() << "\n";
+
+
     CloudPtr scan_world(new PointCloudType);
     // 利用和全局地图配准得到的pose，将scan转换到scan_world，也就是世界坐标系下面去
     pcl::transformPointCloud(*scan, *scan_world, pose.matrix().cast<float>());
 
     // 只选择相关的关键帧拼接为局部地图
     if (IsKeyframe(pose)) {
+        std::cout << "22关键帧,加入局部地图" << std::endl;
+        // 显示当前的估计的pose
+        Eigen::Vector3d t = pose.translation();
+        Eigen::Matrix3d R = pose.rotationMatrix();
+        Eigen::Vector3d euler = R.eulerAngles(0, 1, 2);
+        std::cout << "22--------- SE3f/SE3d 打印 --------- \n";
+        std::cout << "22平移 t = " << t.transpose() << "\n";
+        std::cout << "22旋转矩阵 R = \n" << R << "\n";
+        std::cout << "22欧拉角(rad) roll-pitch-yaw = " << euler.transpose() << "\n";
+        std::cout << "22欧拉角(deg)                = " << (euler * 180 / M_PI).transpose() << "\n";
+
         last_kf_pose_ = pose;
 
         // 重建local map
@@ -45,7 +68,7 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
         if (scans_in_local_map_.size() > options_.num_kfs_in_local_map_) {
             scans_in_local_map_.pop_front();
         }
-
+        std::cout << "22局部地图大小: " << local_map_->size() << std::endl;
         local_map_.reset(new PointCloudType);
         for (auto& scan : scans_in_local_map_) {
             *local_map_ += *scan;
@@ -71,11 +94,22 @@ bool DirectNDTLO::IsKeyframe(const SE3& current_pose) {
     // T12^-1 = T12^T = P1w^-1 * P2w 得到如下结果
     //  其实反向也没有太大的问题，我们需要的模长和角度都是相同的
     SE3 delta = last_kf_pose_.inverse() * current_pose;
-    
-    // norm() 是二范数，平移的范围
-    return delta.translation().norm() > options_.kf_distance_ ||              
-        // so3()选出旋转，log()到旋转向量 norm()计算模长，得到旋转角度   
-        delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; 
+
+    bool distance_ok = delta.translation().norm() > options_.kf_distance_;
+    bool angle_ok = delta.so3().log().norm() > options_.kf_angle_deg_ * math::kDEG2RAD; 
+
+    // 打印出当前近的距离和角度
+    // 将他的矩阵形式的平移和旋转打印出来
+    Vec3d t = delta.translation();
+    Mat3d R = delta.rotationMatrix();
+    std::cout << "当前的变换矩阵 delta.matrix() = \n" << delta.matrix() << "\n";
+    std::cout << "当前的平移增量 t = " << t.transpose() << "\n";
+    std::cout << "当前的旋转增量 R = \n" << R << "\n";
+
+    std::cout << "当前的距离增量:delta.translation().norm() " << delta.translation().norm() << std::endl;
+    std::cout << "当前的角度增量:delta.so3().log().norm() " << delta.so3().log().norm() << std::endl;
+
+    return distance_ok || angle_ok;
 }
 
 SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {

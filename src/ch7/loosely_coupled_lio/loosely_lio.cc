@@ -119,7 +119,7 @@ void LooselyLIO::Undistort() {
             [](const NavStated &s) { return s.GetSE3(); }, Ti, match);
 
         Vec3d pi = ToVec3d(pt);
-        Vec3d p_compensate = TIL_.inverse() * T_end.inverse() * Ti * TIL_ * pi;
+        Vec3d p_compensate = TIL_.inverse() * T_end.inverse() * Ti * TIL_ * pi;   //  7-30 
 
         pt.x = p_compensate(0);
         pt.y = p_compensate(1);
