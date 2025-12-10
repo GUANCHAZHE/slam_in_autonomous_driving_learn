@@ -9,6 +9,7 @@ import glob
 import copy  # 用于深拷贝，防止修改原始数据
 import sophuspy as sp
 from scipy.spatial.transform import Rotation as Rscipy  # 你前面已经导入过
+import pcl
 
 # 顶部添加：
 from scipy.spatial.transform import Rotation as R_scipy
@@ -16,7 +17,7 @@ from scipy.spatial.transform import Rotation as R_scipy
 class PointCloudPlayer:
     """点云加载、播放和配准工具类"""
 
-    def __init__(self, frame_path=None, bag_path=None, topic_name=None):
+    def __init__(self, frame_path=None, bag_path=None, topic_name=None, frame_path_pcd=None):
         """
         初始化点云播放器
         
@@ -26,6 +27,7 @@ class PointCloudPlayer:
             topic_name: rosbag 中的话题名称
         """
         self.frame_path = frame_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames"
+        self.frame_path_pcd = frame_path_pcd or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd"
         self.bag_path = bag_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/test2.bag"
         self.topic_name = topic_name or "/velodyne_points_0"
         self.all_frames = []
@@ -61,6 +63,11 @@ class PointCloudPlayer:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points_np)
         return pcd
+    
+    def save_pcd_open3d(self, points_np, save_path):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points_np.astype(np.float64))
+        o3d.io.write_point_cloud(save_path, pcd, write_ascii=False)   # 二进制更小
 
     def matrix_to_norm_angle(R):
         trace = np.trace(R)
@@ -205,6 +212,45 @@ class PointCloudPlayer:
             frame_id += 1
 
         print(f"总共保存 {frame_id} 帧")
+        bag.close()
+
+    def load_rosbag_save_local_pcd(self, output_dir=None):
+        """
+        从 rosbag 读取点云数据并保存为 npy 文件
+        
+        Args:
+            output_dir: 输出目录，如果为 None 则使用 frame_path
+        """
+        if output_dir is None:
+            output_dir = self.frame_path_pcd
+
+        print(f"rosbag_path: {self.bag_path}")
+        print(f"topic_name: {self.topic_name}")
+        print(f"output_dir: {output_dir}")
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        bag = rosbag.Bag(self.bag_path, "r")
+
+        frame_id = 0
+
+        for topic, msg, t in bag.read_messages(topics=self.topic_name):
+            # 提取 x,y,z
+            pts = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
+            points_np = np.array(list(pts), dtype=np.float32)   # (N,3)
+
+            # 转成 Open3D 点云 
+            pcd = o3d.geometry.PointCloud() 
+            pcd.points = o3d.utility.Vector3dVector(points_np.astype(np.float64))
+
+            # 保存为 PCD 文件 
+            save_path = os.path.join(output_dir, f"frame_{frame_id:06d}.pcd") 
+            o3d.io.write_point_cloud(save_path, pcd, write_ascii=False) 
+            print(f"Saved {save_path} {points_np.shape[0]} points")
+
+            frame_id += 1
+
+        print(f"总共保存 {frame_id} 帧 PCD")
         bag.close()
 
     @staticmethod
@@ -496,8 +542,10 @@ def main():
     # 创建点云播放器实例
     player = PointCloudPlayer()
 
+    # 将rosbag转换为pcd格式的点云
+    player.load_rosbag_save_local_pcd()
     # 从文件中读取点云帧
-    player.load_all_frame_npy()
+    # player.load_all_frame_npy()
 
     # player.show_frame(player.all_frames[0])
 
@@ -506,7 +554,7 @@ def main():
     # player.play_pointcloud_sequence_npy()
 
     # 或执行 ICP 配准测试
-    player.test_icp_registration()
+    # player.test_icp_registration()
 
     # 测试点云合并
     # player.test_cloud_merge()
