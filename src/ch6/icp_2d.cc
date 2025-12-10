@@ -11,11 +11,19 @@
 
 namespace sad {
 
+    // for iter = 1..N:
+//     1. 将源点云转换到当前估计位姿
+//     2. 最近邻搜索找对应点
+//     3. 构造残差 e 和 Jacobian J
+//     4. 累积 H = Σ JᵀJ 和 b = Σ Jᵀ e
+//     5. 求解增量 dx = H⁻¹ b
+//     6. 更新位姿
+//     这里得到的两帧之间的相对移动的位姿pose
 bool Icp2d::AlignGaussNewton(SE2& init_pose) {
     int iterations = 10;
     double cost = 0, lastCost = 0;
     SE2 current_pose = init_pose;
-    const float max_dis2 = 0.01;    // 最近邻时的最远距离（平方）
+    const float max_dis2 = 0.01;    // 最近邻时的最远距离（平方） 10cm
     const int min_effect_pts = 20;  // 最小有效点数
 
     for (int iter = 0; iter < iterations; ++iter) {
@@ -32,9 +40,10 @@ bool Icp2d::AlignGaussNewton(SE2& init_pose) {
                 continue;
             }
 
-            float angle = source_scan_->angle_min + i * source_scan_->angle_increment;
-            float theta = current_pose.so2().log();
-            Vec2d pw = current_pose * Vec2d(r * std::cos(angle), r * std::sin(angle));
+
+            float angle = source_scan_->angle_min + i * source_scan_->angle_increment;  // 当前时刻的激光扫描角度
+            float theta = current_pose.so2().log();                                     // 当前的旋转角
+            Vec2d pw = current_pose * Vec2d(r * std::cos(angle), r * std::sin(angle));  // 激光坐标系转换到世界坐标系
             Point2d pt;
             pt.x = pw.x();
             pt.y = pw.y();
@@ -42,8 +51,9 @@ bool Icp2d::AlignGaussNewton(SE2& init_pose) {
             // 最近邻
             std::vector<int> nn_idx;
             std::vector<float> dis;
-            kdtree_.nearestKSearch(pt, 1, nn_idx, dis);
+            kdtree_.nearestKSearch(pt, 1, nn_idx, dis);   // 返回最近的k = 1点索引nn_idx和它的距离平方dis
 
+            // 最近的点在范围内，开始计算位姿
             if (nn_idx.size() > 0 && dis[0] < max_dis2) {
                 effective_num++;
                 Mat32d J;
@@ -57,6 +67,7 @@ bool Icp2d::AlignGaussNewton(SE2& init_pose) {
             }
         }
 
+        // 最少匹配到20个相关的点，才算是匹配成功
         if (effective_num < min_effect_pts) {
             return false;
         }
@@ -67,6 +78,7 @@ bool Icp2d::AlignGaussNewton(SE2& init_pose) {
             break;
         }
 
+        // 代价提前手链
         cost /= effective_num;
         if (iter > 0 && cost >= lastCost) {
             break;
@@ -74,8 +86,8 @@ bool Icp2d::AlignGaussNewton(SE2& init_pose) {
 
         LOG(INFO) << "iter " << iter << " cost = " << cost << ", effect num: " << effective_num;
 
-        current_pose.translation() += dx.head<2>();
-        current_pose.so2() = current_pose.so2() * SO2::exp(dx[2]);
+        current_pose.translation() += dx.head<2>();                 // 平移 x,y
+        current_pose.so2() = current_pose.so2() * SO2::exp(dx[2]);  // 旋转 θ 右乘*exp(dθ) 
         lastCost = cost;
     }
 

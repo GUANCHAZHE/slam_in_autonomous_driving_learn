@@ -52,8 +52,8 @@ bool Icp3d::AlignP2P(SE3& init_pose) {
                 // build residual
                 Vec3d e = p - qs;
                 Eigen::Matrix<double, 3, 6> J;
-                J.block<3, 3>(0, 0) = pose.so3().matrix() * SO3::hat(q);
-                J.block<3, 3>(0, 3) = -Mat3d::Identity();
+                J.block<3, 3>(0, 0) = pose.so3().matrix() * SO3::hat(q);   // 7-4
+                J.block<3, 3>(0, 3) = -Mat3d::Identity();                  // 7-4
 
                 jacobians[idx] = J;
                 errors[idx] = e;

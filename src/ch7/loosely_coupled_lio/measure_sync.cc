@@ -5,6 +5,11 @@
 
 namespace sad {
 
+// 它以激光雷达扫描的开始和结束时间作为参考时间窗口。
+// 它收集所有时间戳落在该窗口内的IMU数据。
+// 它等待直到有足够的IMU数据覆盖了整个激光雷达扫描周期。
+// 最终输出一个包含单帧激光雷达数据和对应时间段内所有IMU数据的同步数据包。
+// 通过不断处理缓冲区中的数据，实现了连续的数据流同步。
 bool MessageSync::Sync() {
     if (lidar_buffer_.empty() || imu_buffer_.empty()) {
         return false;

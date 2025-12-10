@@ -36,6 +36,7 @@ bool LooselyLIO::Init(const std::string &config_yaml) {
 
 bool LooselyLIO::LoadFromYAML(const std::string &yaml_file) {
     // get params from yaml
+    // 设置回调函数sync，使用的方式为lambda的方式来获取
     sync_ = std::make_shared<MessageSync>([this](const MeasureGroup &m) { ProcessMeasurements(m); });
     sync_->Init(yaml_file);
 
@@ -119,7 +120,7 @@ void LooselyLIO::Undistort() {
             [](const NavStated &s) { return s.GetSE3(); }, Ti, match);
 
         Vec3d pi = ToVec3d(pt);
-        Vec3d p_compensate = TIL_.inverse() * T_end.inverse() * Ti * TIL_ * pi;
+        Vec3d p_compensate = TIL_.inverse() * T_end.inverse() * Ti * TIL_ * pi;   //  7-30 
 
         pt.x = p_compensate(0);
         pt.y = p_compensate(1);

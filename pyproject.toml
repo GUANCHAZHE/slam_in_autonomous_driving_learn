@@ -1,0 +1,7 @@
+[project]
+name = "slam-in-autonomous-driving"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []

@@ -96,3 +96,10 @@ target_link_libraries(run_gen_simu_data
         ${PROJECT_NAME}.common
         ${third_party_libs}
         )
+
+add_executable(test_call_back 
+        test/test_call_back.cc
+        )
+target_link_libraries(test_call_back
+        ${PROJECT_NAME}.common
+        )

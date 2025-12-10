@@ -113,6 +113,7 @@ data/ch3/state.txt
 data/ch3/gins.txt
 data/ch3/gnss_output.txt
 data/ch4/gins_preintg.txt
+<<<<<<< HEAD
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
@@ -185,3 +186,11 @@ qtcreator-*
 # Catkin custom files
 CATKIN_IGNORE
 
+=======
+node_modules/**
+package.json
+package-lock.json
+dataset/*
+
+*.bin
+>>>>>>> 5185ab465f9db083b803ccd7477c8a0567b1a7ba

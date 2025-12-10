@@ -55,7 +55,7 @@ TEST(CH5_TEST, BFNN) {
 
 /**
  * 评测最近邻的正确性
- * @param truth 真值
+ * @param truth 真值  这个选择的方法就是较为慢的方法测试得到结果，但是准确性较高，比如BF
  * @param esti  估计
  */
 void EvaluateMatches(const std::vector<std::pair<size_t, size_t>>& truth,
@@ -65,7 +65,7 @@ void EvaluateMatches(const std::vector<std::pair<size_t, size_t>>& truth,
 
     LOG(INFO) << "truth: " << truth.size() << ", esti: " << esti.size();
 
-    /// 检查某个匹配在另一个容器中存不存在
+    /// 检查某个匹配在另一个容器中存不存在   仿函数用法
     auto exist = [](const std::pair<size_t, size_t>& data, const std::vector<std::pair<size_t, size_t>>& vec) -> bool {
         return std::find(vec.begin(), vec.end(), data) != vec.end();
     };
