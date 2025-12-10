@@ -328,6 +328,77 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
     LOG(INFO) << "测试程序结束" ;
  }
 
+void test_rotate()
+{
+    Eigen::Matrix3d R;
+    R << 1, 2, 3, 4, 5, 6, 7, 8, 9;
+    std::cout << "原始矩阵 R:\n" << R << std::endl;
+
+
+    Eigen::Matrix3d rotation_matrix = Eigen::Matrix3d::Identity();
+    Eigen::AngleAxis rotation_vector(M_PI / 4, Eigen::Vector3d(0, 0, 1));  // 围绕z轴旋转45
+    std::cout.precision(3);
+    
+    Eigen::Vector3d v(1, 0, 0);
+    std::cout << "旋转之前的向量 v:\n" << v.transpose() << std::endl;
+
+    rotation_matrix = rotation_vector.toRotationMatrix();
+    std::cout<< "rotation_vector.matrix() = \n" << rotation_vector.matrix() << std::endl;
+    std::cout<< "rotation_vector.toRotationMatrix() \n" << rotation_vector.toRotationMatrix() << std::endl;
+
+    Eigen::Vector3d v_rotated = rotation_vector * v;
+    std::cout << "旋转后的向量 v_rotated:\n" << v_rotated.transpose() << std::endl;
+
+    // euler角
+    Eigen::Vector3d euler_angels = rotation_matrix.eulerAngles(2, 1, 0); // ZYX顺序
+    std::cout << "Euler角 (ZYX顺序):\n" << euler_angels.transpose() << std::endl;
+
+    // 齐次变换
+    Eigen::Isometry3d T = Eigen::Isometry3d::Identity();
+    T.rotate(rotation_vector);
+    T.pretranslate(Eigen::Vector3d(1, 2, 3));
+    std::cout << "齐次变换矩阵 T:\n" << T.matrix() << std::endl;
+
+    // 四元数
+    Eigen::Quaterniond q(rotation_vector);
+    std::cout << "四元数 q:\n" << q.coeffs().transpose() << std::endl; // coeffs顺序为 (x, y, z, w)  虚部在前，实部在后
+
+    q = Eigen::Quaterniond(rotation_matrix);
+    std::cout << "由旋转矩阵构造的四元数 q:\n" << q.coeffs().transpose() << std::endl;
+
+    v_rotated = q * v;
+    std::cout << "用四元数旋转后的向量 v_rotated:\n" << v_rotated.transpose() << std::endl;
+
+    // so3李群
+    Sophus::SO3d SO3_R(rotation_matrix);
+    Sophus::SO3d SO3_q(q);
+    std::cout << "Sophus SO(3) from rotation matrix:\n" << SO3_R.matrix() << std::endl;
+    std::cout << "Sophus SO(3) from quaternion:\n" << SO3_q.matrix() << std::endl;
+    
+    // so3李代数
+    Eigen::Vector3d so3 = SO3_R.log();
+    std::cout << "so3" << so3.transpose() << std::endl;
+
+    // se3 李群
+    Eigen::Vector3d t(1, 0, 0);
+    Eigen::Matrix3d R_ = Eigen::AngleAxisd(M_PI / 4, Eigen::Vector3d(0,0,1)).toRotationMatrix();
+    Sophus::SE3d SE3_Rt(R_, t);
+    std::cout << "Sophus SE(3) from R,t:\n" << SE3_Rt.matrix() << std::endl;
+
+    typedef Eigen::Matrix<double, 6, 1> Vector6d;
+    Vector6d se3 = SE3_Rt.log();
+    std::cout << "se3: " << se3.transpose() << std::endl;
+
+    // 演示查看如何跟新
+    Vector6d updated_se3;
+    updated_se3.Zero();
+    updated_se3(0, 0) = 0.0001;
+    Sophus::SE3d SE3_updated = Sophus::SE3d::exp(updated_se3) * SE3_Rt;
+    cout << "SE3 updated = \n" << SE3_updated.matrix() << std::endl; 
+}
+
+
+
 int main(int argc, char ** argv) {
 
     // 启用日志系统
@@ -339,7 +410,8 @@ int main(int argc, char ** argv) {
     LOG(INFO) << "主程序启动";
 
     // 测试相关的代码
-    test_templocal_lo();
+    // test_templocal_lo();
+    test_rotate();
 
     LOG(INFO) << "主程序结束";
 
