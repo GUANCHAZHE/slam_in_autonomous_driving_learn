@@ -6,8 +6,28 @@
 #include <string>
 #include <algorithm>
 #include <chrono>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <thread>
+#include <cmath>
+#include <filesystem>
+
+// PCL头文件
 #include <pcl/io/pcd_io.h>
+#include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/filters/voxel_grid.h>
+
+// log 日志
+#include <glog/logging.h>
+
+// 包含系统中的点类型
+#include "common/point_types.h"
+
+
+
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
 
 // 模拟IMU数据
 struct IMUData {
@@ -196,59 +216,157 @@ private:
     std::shared_ptr<MessageSync> sync_ = nullptr;  // 消息同步器
 };
 
+std::string Frame_pcd_dir = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd";
+std::string frame_0 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd/frame_000000.pcd";
 
-void ReadAndShowFrame()
+void ReadandShowFrame()
 {
+    // 打印测试的相关pcd 点云
+    PointCloud_XYZ::Ptr cloud(new PointCloud_XYZ);
+    pcl::io::loadPCDFile(frame_0, *cloud);
+    LOG(INFO) << "点云的大小" << cloud->width * cloud->height;
+
+    // 创建可视化容器
+    pcl::visualization::PCLVisualizer viewer("PCD viewer");
+    viewer.setBackgroundColor(0,0,0);
+    viewer.addPointCloud(cloud, "cloud");
+    // viewer.initCameraParameters();
     
+    while ((!viewer.wasStopped()))
+    {
+        viewer.spinOnce(100);
+    }
 }
 
-int main() {
 
+void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &frames, int start_id = 0, int count = 10)
+{
+    // 初始化可视化器
+    pcl::visualization::PCLVisualizer viewer("PCD Sequence Player");
+    viewer.setBackgroundColor(0, 0, 0);
 
+    // 用于重复更新的对象名
+    const std::string cloud_id = "cloud";
 
+    // 装载点云缓存，提高播放效率
+    frames.reserve(count);
 
-    std::cout << "=== 模拟LIO系统的回调函数机制 ===" << std::endl;
+    //  加载文件名称
+    for (int i = 0; i < count; i++)
+    {
+        int frame_id = start_id + i;
 
-    // 创建LIO模拟器
-    SimulationLIO lio_system;
+        char filename[256];
+        sprintf(filename, "%s/frame_%06d.pcd", folder.c_str(), frame_id);
 
-    std::cout << "\n开始模拟数据流..." << std::endl;
-
-    // 5 帧的雷达 10hz 
-    //     每个间隔内得到10帧的 imu 数据， 100hz
-    // 模拟传感器数据流（类似ROSBag播放）
-    for (int i = 0; i < 5; ++i) {
-        double timestamp = i * 0.2; // 每0.2秒一个激光雷达帧
-
-        // 创建模拟激光雷达点云数据
-        auto cloud = std::make_shared<PointCloud>(timestamp);
-        cloud->addPoint(1.0 + i, 2.0 + i);
-        cloud->addPoint(1.5 + i, 2.5 + i);
-        cloud->addPoint(2.0 + i, 3.0 + i);
-
-        // 模拟在激光雷达扫描期间接收多个IMU数据
-        for (int j = 0; j < 10; ++j) {
-            double imu_timestamp = timestamp + j * 0.01; // IMU数据频率更高
-            auto imu = std::make_shared<IMUData>(
-                imu_timestamp,
-                0.1 + j*0.01, 0.2 + j*0.01, 0.3 + j*0.01,  // 陀螺仪数据
-                9.8, 0.1, 0.2  // 加速度计数据
-            );
-
-            // 触发IMU回调函数
-            lio_system.IMUCallback(imu);
+        PointCloud_XYZ::Ptr cloud(new PointCloud_XYZ);
+        if (pcl::io::loadPCDFile(filename, *cloud) != 0) {
+            std::cerr << "无法加载: " << filename << std::endl;
+            continue;
         }
 
-        // 触发激光雷达回调函数
-        std::cout << "\n--- 激光雷达帧 " << i << " 到达 ---" << std::endl;
-        lio_system.PointCloudCallback(cloud);
+        frames.push_back(cloud);
+        std::cout << "加载成功：" << filename
+                  << " 点数: " << cloud->size() << std::endl;
     }
 
-    std::cout << "\n=== 回调函数机制演示完成 ===" << std::endl;
-    std::cout << "回调函数实现的关键点:" << std::endl;
-    std::cout << "1. MessageSync类保存回调函数，在数据同步完成时调用" << std::endl;
-    std::cout << "2. 使用lambda表达式捕获this指针，调用成员函数" << std::endl;
-    std::cout << "3. 事件驱动模式：数据到达 -> 同步 -> 触发回调 -> 处理数据" << std::endl;
+    if (frames.empty()) {
+        std::cerr << "没有有效的帧，无法播放!" << std::endl;
+        return;
+    }
+
+    // 初次添加点云
+
+
+    // 开始点云拼接
+    PointCloud_XYZ::Ptr local_map(new PointCloud_XYZ);    
+    *local_map =  *frames[0] + *frames[90];
+
+
+    // viewer.addPointCloud(frames[90], cloud_id);
+    // viewer.spinOnce(10000);
+    viewer.addPointCloud(local_map, cloud_id);
+    viewer.spinOnce(10000);
+    
+    // int idx = 0;
+    // while (!viewer.wasStopped())
+    // {
+    //     viewer.spinOnce(10);
+
+    //     // 100 ms 切换下一帧
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    //     // idx = (idx + 1) % frames.size();
+
+    //     idx = idx + 1;
+    //     // 更新点云内容（无需删除/添加）
+    //     viewer.updatePointCloud(frames[idx], cloud_id);
+
+    //     viewer.setWindowName("PCD Player - Frame " + std::to_string(idx));
+    // }
+}
+
+
+ void test_templocal_lo()
+ {
+    std::vector<PointCloud_XYZ::Ptr> frames;
+    LOG(INFO) << "测试程序启动" ;
+    // ReadandShowFrame();
+    PlayFrames(Frame_pcd_dir, frames, 900, 100);  // 从 1000 到开始加载 1200 帧
+    LOG(INFO) << "测试程序结束" ;
+ }
+
+int main(int argc, char ** argv) {
+
+    // 启用日志系统
+    google::InitGoogleLogging(argv[0]);
+
+    // 测试相关的代码
+    test_templocal_lo();
+
+
+
+    // // 创建LIO模拟器
+
+    // SimulationLIO lio_system;
+
+    // std::cout << "\n开始模拟数据流..." << std::endl;
+
+    // // 5 帧的雷达 10hz 
+    // //     每个间隔内得到10帧的 imu 数据， 100hz
+    // // 模拟传感器数据流（类似ROSBag播放）
+    // for (int i = 0; i < 5; ++i) {
+    //     double timestamp = i * 0.2; // 每0.2秒一个激光雷达帧
+
+    //     // 创建模拟激光雷达点云数据
+    //     auto cloud = std::make_shared<PointCloud>(timestamp);
+    //     cloud->addPoint(1.0 + i, 2.0 + i);
+    //     cloud->addPoint(1.5 + i, 2.5 + i);
+    //     cloud->addPoint(2.0 + i, 3.0 + i);
+
+    //     // 模拟在激光雷达扫描期间接收多个IMU数据
+    //     for (int j = 0; j < 10; ++j) {
+    //         double imu_timestamp = timestamp + j * 0.01; // IMU数据频率更高
+    //         auto imu = std::make_shared<IMUData>(
+    //             imu_timestamp,
+    //             0.1 + j*0.01, 0.2 + j*0.01, 0.3 + j*0.01,  // 陀螺仪数据
+    //             9.8, 0.1, 0.2  // 加速度计数据
+    //         );
+
+    //         // 触发IMU回调函数
+    //         lio_system.IMUCallback(imu);
+    //     }
+
+    //     // 触发激光雷达回调函数
+    //     std::cout << "\n--- 激光雷达帧 " << i << " 到达 ---" << std::endl;
+    //     lio_system.PointCloudCallback(cloud);
+    // }
+
+    // std::cout << "\n=== 回调函数机制演示完成 ===" << std::endl;
+    // std::cout << "回调函数实现的关键点:" << std::endl;
+    // std::cout << "1. MessageSync类保存回调函数，在数据同步完成时调用" << std::endl;
+    // std::cout << "2. 使用lambda表达式捕获this指针，调用成员函数" << std::endl;
+    // std::cout << "3. 事件驱动模式：数据到达 -> 同步 -> 触发回调 -> 处理数据" << std::endl;
 
     return 0;
 }
