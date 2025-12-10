@@ -24,7 +24,7 @@
 
 // 包含系统中的点类型
 #include "common/point_types.h"
-
+#include "ch7/ndt_3d.h"
 
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
@@ -252,6 +252,8 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
     frames.reserve(count);
 
     //  加载文件名称
+
+    LOG(INFO) << "开始加载点云文件";
     for (int i = 0; i < count; i++)
     {
         int frame_id = start_id + i;
@@ -266,9 +268,10 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
         }
 
         frames.push_back(cloud);
-        std::cout << "加载成功：" << filename
-                  << " 点数: " << cloud->size() << std::endl;
+        // std::cout << "加载成功：" << filename
+        //           << " 点数: " << cloud->size() << std::endl;
     }
+    LOG(INFO) << "结束加载点云文件";
 
     if (frames.empty()) {
         std::cerr << "没有有效的帧，无法播放!" << std::endl;
@@ -276,34 +279,41 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
     }
 
     // 初次添加点云
+    viewer.addPointCloud(frames[0], cloud_id);
 
+    // // 开始点云拼接
+    // PointCloud_XYZ::Ptr local_map(new PointCloud_XYZ);    
+    // *local_map =  *frames[0] + *frames[90];
 
-    // 开始点云拼接
-    PointCloud_XYZ::Ptr local_map(new PointCloud_XYZ);    
-    *local_map =  *frames[0] + *frames[90];
+    // // viewer.addPointCloud(frames[90], cloud_id);
+    // // viewer.spinOnce(10000);
 
-
-    // viewer.addPointCloud(frames[90], cloud_id);
+    // viewer.addPointCloud(local_map, cloud_id);
     // viewer.spinOnce(10000);
-    viewer.addPointCloud(local_map, cloud_id);
-    viewer.spinOnce(10000);
     
-    // int idx = 0;
-    // while (!viewer.wasStopped())
-    // {
-    //     viewer.spinOnce(10);
 
-    //     // 100 ms 切换下一帧
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    //     // idx = (idx + 1) % frames.size();
+    // 循环播放显示点云
+    int idx = 0;
+    LOG(INFO) << "点云开始播放";
+    while (!viewer.wasStopped() && idx < frames.size())
+    {
+        viewer.spinOnce(10);
 
-    //     idx = idx + 1;
-    //     // 更新点云内容（无需删除/添加）
-    //     viewer.updatePointCloud(frames[idx], cloud_id);
+        // 100 ms 切换下一帧
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    //     viewer.setWindowName("PCD Player - Frame " + std::to_string(idx));
-    // }
+        // 循环播放
+        // idx = (idx + 1) % frames.size();
+
+        // 更新点云内容（无需删除/添加）
+        viewer.updatePointCloud(frames[idx], cloud_id);
+        viewer.setWindowName("PCD Player - Frame " + std::to_string(idx));
+
+        idx = idx + 1;
+        LOG(INFO) << "已显示第 " << idx << " 帧";
+    }
+    LOG(INFO) << "点云播放完毕";
 }
 
 
@@ -312,6 +322,8 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
     std::vector<PointCloud_XYZ::Ptr> frames;
     LOG(INFO) << "测试程序启动" ;
     // ReadandShowFrame();
+
+    // 读取相关的点云数据
     PlayFrames(Frame_pcd_dir, frames, 900, 100);  // 从 1000 到开始加载 1200 帧
     LOG(INFO) << "测试程序结束" ;
  }
@@ -320,9 +332,16 @@ int main(int argc, char ** argv) {
 
     // 启用日志系统
     google::InitGoogleLogging(argv[0]);
+    FLAGS_logtostderr = 1;  // 输出到标准错误
+    FLAGS_stderrthreshold = 0; // 输出所有级别的日志
+    FLAGS_colorlogtostderr = true; // 彩色输出
+
+    LOG(INFO) << "主程序启动";
 
     // 测试相关的代码
     test_templocal_lo();
+
+    LOG(INFO) << "主程序结束";
 
 
 
