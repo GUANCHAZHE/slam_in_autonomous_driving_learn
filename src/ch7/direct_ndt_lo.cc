@@ -138,8 +138,8 @@ SE3 DirectNDTLO::AlignWithLocalMap(CloudPtr scan) {
         SE3 T1 = estimated_poses_[estimated_poses_.size() - 1];
         SE3 T2 = estimated_poses_[estimated_poses_.size() - 2];
         // 位移增量 Δ = T2^{-1} T1
-        // 按恒速预测 T3 = T1 * Δ   将Δ 视为点
-        guess = T1 * (T2.inverse() * T1);
+        // 按恒速预测 T3 = T1 * Δ   将Δ视为点的增量 并且Δ是机器人坐标系下的增量
+        guess = T1 * (T2.inverse() * T1);  
 
         if (options_.use_pcl_ndt_) {
             ndt_pcl_.align(*output, guess.matrix().cast<float>());

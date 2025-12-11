@@ -18,13 +18,17 @@
 #include <pcl/point_types.h>
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/common/transforms.h>
 
 // log 日志
 #include <glog/logging.h>
+// 命令行参数解析
+#include <gflags/gflags.h>
 
 // 包含系统中的点类型
 #include "common/point_types.h"
 #include "ch7/ndt_3d.h"
+#include "common/point_cloud_utils.h"
 
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
@@ -218,7 +222,7 @@ private:
 
 std::string Frame_pcd_dir = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd";
 std::string frame_0 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd/frame_000000.pcd";
-
+std::string output_cloud_path = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/output_cloud.pcd";
 void ReadandShowFrame()
 {
     // 打印测试的相关pcd 点云
@@ -239,21 +243,13 @@ void ReadandShowFrame()
 }
 
 
-void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &frames, int start_id = 0, int count = 10)
+void PlayFrames(const std::string& folder, std::vector<sad::CloudPtr> &frames_sad, int start_id, int count, bool &is_vis)
 {
-    // 初始化可视化器
-    pcl::visualization::PCLVisualizer viewer("PCD Sequence Player");
-    viewer.setBackgroundColor(0, 0, 0);
-
-    // 用于重复更新的对象名
-    const std::string cloud_id = "cloud";
+    LOG(INFO) << "开始加载点云文件";
 
     // 装载点云缓存，提高播放效率
-    frames.reserve(count);
+    frames_sad.reserve(count);
 
-    //  加载文件名称
-
-    LOG(INFO) << "开始加载点云文件";
     for (int i = 0; i < count; i++)
     {
         int frame_id = start_id + i;
@@ -261,70 +257,140 @@ void PlayFrames(const std::string& folder, std::vector<PointCloud_XYZ::Ptr> &fra
         char filename[256];
         sprintf(filename, "%s/frame_%06d.pcd", folder.c_str(), frame_id);
 
-        PointCloud_XYZ::Ptr cloud(new PointCloud_XYZ);
-        if (pcl::io::loadPCDFile(filename, *cloud) != 0) {
+        // 先用PCL加载点云
+        PointCloud_XYZ::Ptr pcl_cloud(new PointCloud_XYZ);
+        if (pcl::io::loadPCDFile(filename, *pcl_cloud) != 0) {
             std::cerr << "无法加载: " << filename << std::endl;
             continue;
         }
 
-        frames.push_back(cloud);
-        // std::cout << "加载成功：" << filename
-        //           << " 点数: " << cloud->size() << std::endl;
-    }
-    LOG(INFO) << "结束加载点云文件";
+        // 转换为sad::CloudPtr格式，便于NDT使用
+        sad::CloudPtr sad_cloud(new sad::PointCloudType);
+        sad_cloud->resize(pcl_cloud->size());
+        for (size_t j = 0; j < pcl_cloud->size(); ++j) {
+            sad::PointType pt;
+            pt.x = pcl_cloud->points[j].x;
+            pt.y = pcl_cloud->points[j].y;
+            pt.z = pcl_cloud->points[j].z;
+            pt.intensity = 1e-6;  // 采取统一的默认值
+            sad_cloud->points[j] = pt;
+        }
+        sad_cloud->width = pcl_cloud->width;
+        sad_cloud->height = pcl_cloud->height;
+        sad_cloud->is_dense = pcl_cloud->is_dense;
 
-    if (frames.empty()) {
+        frames_sad.push_back(sad_cloud);
+        LOG(INFO) << "加载成功：" << filename << " 点数: " << sad_cloud->size();
+    }
+
+    LOG(INFO) << "结束加载点云文件，共加载 " << frames_sad.size() << " 个点云";
+
+    if (frames_sad.empty()) {
         std::cerr << "没有有效的帧，无法播放!" << std::endl;
         return;
     }
 
-    // 初次添加点云
-    viewer.addPointCloud(frames[0], cloud_id);
+    // 可视化部分（可选）
+    LOG(INFO) << "开始可视化点云";
+    pcl::visualization::PCLVisualizer viewer("PCD Sequence Player");
+    viewer.setBackgroundColor(0, 0, 0);
 
-    // // 开始点云拼接
-    // PointCloud_XYZ::Ptr local_map(new PointCloud_XYZ);    
-    // *local_map =  *frames[0] + *frames[90];
+    // 用于重复更新的对象名
+    const std::string cloud_id = "cloud";
 
-    // // viewer.addPointCloud(frames[90], cloud_id);
-    // // viewer.spinOnce(10000);
+    // 将当前sad格式的点云转换为PCL格式以进行可视化
+    std::vector<PointCloud_XYZ::Ptr> vis_clouds(frames_sad.size());
+    for (size_t idx = 0; idx < frames_sad.size(); ++idx) {
+        vis_clouds[idx] = PointCloud_XYZ::Ptr(new PointCloud_XYZ);
+        vis_clouds[idx]->resize(frames_sad[idx]->size());
+        for (size_t i = 0; i < frames_sad[idx]->size(); ++i) {
+            pcl::PointXYZ pt;
+            pt.x = frames_sad[idx]->points[i].x;
+            pt.y = frames_sad[idx]->points[i].y;
+            pt.z = frames_sad[idx]->points[i].z;
+            vis_clouds[idx]->points[i] = pt;
+        }
+        vis_clouds[idx]->width = frames_sad[idx]->width;
+        vis_clouds[idx]->height = frames_sad[idx]->height;
+        vis_clouds[idx]->is_dense = frames_sad[idx]->is_dense;
+    }
 
-    // viewer.addPointCloud(local_map, cloud_id);
-    // viewer.spinOnce(10000);
-    
 
+    viewer.addPointCloud(vis_clouds[0], cloud_id);
+    viewer.setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, cloud_id);
 
     // 循环播放显示点云
     int idx = 0;
     LOG(INFO) << "点云开始播放";
-    while (!viewer.wasStopped() && idx < frames.size())
+    while (!viewer.wasStopped() && idx < frames_sad.size() && is_vis)
     {
         viewer.spinOnce(10);
 
-        // 100 ms 切换下一帧
+        // 500 ms 切换下一帧
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        // 循环播放
-        // idx = (idx + 1) % frames.size();
-
-        // 更新点云内容（无需删除/添加）
-        viewer.updatePointCloud(frames[idx], cloud_id);
-        viewer.setWindowName("PCD Player - Frame " + std::to_string(idx));
+        // 更新点云内容
+        viewer.updatePointCloud(vis_clouds[idx], cloud_id);
+        viewer.setWindowName("PCD Player - Frame " + std::to_string(start_id + idx) + ", Points: " + std::to_string(vis_clouds[idx]->size()));
 
         idx = idx + 1;
-        LOG(INFO) << "已显示第 " << idx << " 帧";
+        // LOG(INFO) << "已显示第 " << idx << " 帧";
     }
     LOG(INFO) << "点云播放完毕";
 }
 
 
- void test_templocal_lo()
+ void test_templocal_lo(bool & is_vis)
  {
-    std::vector<PointCloud_XYZ::Ptr> frames;
+    std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
+    sad::CloudPtr output_cloud(new sad::PointCloudType);    // 输出点云
+
     LOG(INFO) << "测试程序启动" ;
     // ReadandShowFrame();
 
-    // 读取相关的点云数据
-    PlayFrames(Frame_pcd_dir, frames, 900, 100);  // 从 1000 到开始加载 1200 帧
+    is_vis = false;
+    // 读取相关的点云数据，现在直接加载为sad::CloudPtr格式，便于NDT使用
+    PlayFrames(Frame_pcd_dir, frames_sad, 900, 100, is_vis);  // 从 900 开始加载 10 个点云
+    LOG(INFO) << "加载完成 " << frames_sad.size() << " 个点云";
+
+    if (frames_sad.size() < 2) {
+        LOG(WARNING) << "点云数量不足，无法进行NDT配准";
+        LOG(INFO) << "测试程序结束" ;
+        return;
+    }
+
+    LOG(INFO) << "开始使用NDT算法进行点云配准";
+
+    // 创建NDT对象
+    sad::Ndt3d::Options ndt_options;
+    ndt_options.voxel_size_ = 0.5;      // 设置体素大小为0.5米
+    ndt_options.max_iteration_ = 30;     // 最大迭代次数
+    ndt_options.min_effective_pts_ = 5;  // 最小有效点数
+    sad::Ndt3d ndt(ndt_options);
+
+    // 取出第0个和第1个点云进行NDT配准
+    sad::CloudPtr target_cloud = frames_sad[0];  // 目标点云
+    sad::CloudPtr scan = frames_sad[1];  // 源点云
+    sad::CloudPtr scan_world(new sad::PointCloudType); // 变换后的源点云
+
+    
+    for(int i = 1; i < frames_sad.size(); i++)
+    {
+        ndt.SetSource(frames_sad[i]);
+        ndt.SetTarget(frames_sad[i-1]);
+        SE3 pose1;
+        ndt.AlignNdt(pose1);
+        std::cout << "NDT配准结果:\n " << pose1.matrix() << std::endl;
+        pcl::transformPointCloud(*frames_sad[i], *scan_world, pose1.matrix().cast<float>());
+         // 合并目标点云和变换后的源点云
+        *output_cloud += *scan_world;
+    }
+    // 保存最终的点云结果
+    sad::SaveCloudToFile(output_cloud_path, *output_cloud);
+
+    LOG(INFO) << "源点云大小: " << scan->size();
+    LOG(INFO) << "目标点云大小: " << target_cloud->size();
+
     LOG(INFO) << "测试程序结束" ;
  }
 
@@ -390,9 +456,10 @@ void test_rotate()
     std::cout << "se3: " << se3.transpose() << std::endl;
 
     // 演示查看如何跟新
-    Vector6d updated_se3;
-    updated_se3.Zero();
+    Vector6d updated_se3 = Vector6d::Zero();
+    // 只更新位移第一个元素，第0行0列，而非第一个元素
     updated_se3(0, 0) = 0.0001;
+    cout << "updated_se3: " << updated_se3.transpose() << std::endl;  
     Sophus::SE3d SE3_updated = Sophus::SE3d::exp(updated_se3) * SE3_Rt;
     cout << "SE3 updated = \n" << SE3_updated.matrix() << std::endl; 
 }
@@ -401,6 +468,7 @@ void test_rotate()
 
 int main(int argc, char ** argv) {
 
+    bool is_vis = true;
     // 启用日志系统
     google::InitGoogleLogging(argv[0]);
     FLAGS_logtostderr = 1;  // 输出到标准错误
@@ -410,8 +478,8 @@ int main(int argc, char ** argv) {
     LOG(INFO) << "主程序启动";
 
     // 测试相关的代码
-    // test_templocal_lo();
-    test_rotate();
+    test_templocal_lo(is_vis);
+    // test_rotate();
 
     LOG(INFO) << "主程序结束";
 

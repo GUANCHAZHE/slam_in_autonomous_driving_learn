@@ -102,4 +102,5 @@ add_executable(test_call_back
         )
 target_link_libraries(test_call_back
         ${PROJECT_NAME}.common
+        ${PROJECT_NAME}.ch7
         )
