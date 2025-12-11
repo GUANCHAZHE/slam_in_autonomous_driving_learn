@@ -549,6 +549,27 @@ void test_rotate()
 }
 
 
+void test_transfomr()
+{
+    Eigen::Quaterniond q1(0.35, 0.2, 0.3, 0.1), q2(-0.5, 0.4, -0.1, 0.2);
+    q1.normalize();
+    q2.normalize();
+    Eigen::Vector3d t1(0.3, 0.1, 0.1), t2(-0.1, 0.4, 0.2);
+    Vec3d p1(0.5, 0, 0.2);
+
+    Eigen::Isometry3d T1w(q1), T2w(q2);
+    T1w.pretranslate(t1);
+    T2w.pretranslate(t2);
+
+    Vec3d p2 = T2w*T1w.inverse()* p1;
+    Eigen::Isometry3d T21 = T2w * T1w.inverse();
+    std::cout <<" p2" << p2.transpose() << std::endl;
+    std::cout <<" T1w \n" << T1w.matrix() << std::endl;
+    std::cout <<" T2w \n" << T2w.matrix() << std::endl;
+    std::cout <<" T21 \n" << T21.matrix() << std::endl;
+    // T21.matrix().eulerAngles(2,1,0);
+    std::cout << "T21 euler angles: \n" << T21.rotation().eulerAngles(2,1,0) << std::endl;
+} 
 
 int main(int argc, char ** argv) {
 
@@ -562,9 +583,11 @@ int main(int argc, char ** argv) {
     LOG(INFO) << "主程序启动";
 
     // 测试相关的代码
-    test_templocal_lo(is_vis);
+    // test_templocal_lo(is_vis);
     // test_rotate();
 
+
+    test_transfomr();
     LOG(INFO) << "主程序结束";
 
 
