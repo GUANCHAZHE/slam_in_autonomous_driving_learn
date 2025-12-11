@@ -77,7 +77,7 @@ bool Ndt3d::AlignNdt(SE3& init_pose) {
     SE3 pose = init_pose;
     if (options_.remove_centroid_) {
         pose.translation() = target_center_ - source_center_;  // 设置平移初始值
-        LOG(INFO) << "init trans set to " << pose.translation().transpose();
+        // LOG(INFO) << "init trans set to " << pose.translation().transpose();
     }
 
     // 对点的索引，预先生成
@@ -170,9 +170,9 @@ bool Ndt3d::AlignNdt(SE3& init_pose) {
         pose.translation() += dx.tail<3>();
 
         // 更新
-        LOG(INFO) << "iter " << iter << " total res: " << total_res << ", eff: " << effective_num
-                  << ", mean res: " << total_res / effective_num << ", dxn: " << dx.norm()
-                  << ", dx: " << dx.transpose();
+        // LOG(INFO) << "iter " << iter << " total res: " << total_res << ", eff: " << effective_num
+        //           << ", mean res: " << total_res / effective_num << ", dxn: " << dx.norm()
+        //           << ", dx: " << dx.transpose();
 
         // std::sort(chi2.begin(), chi2.end());
         // LOG(INFO) << "chi2 med: " << chi2[chi2.size() / 2] << ", .7: " << chi2[chi2.size() * 0.7]
@@ -180,11 +180,11 @@ bool Ndt3d::AlignNdt(SE3& init_pose) {
 
         if (gt_set_) {
             double pose_error = (gt_pose_.inverse() * pose).log().norm();
-            LOG(INFO) << "iter " << iter << " pose error: " << pose_error;
+            // LOG(INFO) << "iter " << iter << " pose error: " << pose_error;
         }
 
         if (dx.norm() < options_.eps_) {
-            LOG(INFO) << "converged, dx = " << dx.transpose();
+            // LOG(INFO) << "converged, dx = " << dx.transpose();
             break;
         }
     }

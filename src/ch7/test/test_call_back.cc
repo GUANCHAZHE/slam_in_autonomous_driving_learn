@@ -29,7 +29,7 @@
 #include "common/point_types.h"
 #include "ch7/ndt_3d.h"
 #include "common/point_cloud_utils.h"
-
+#include "common/math_utils.h"
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
 
@@ -327,7 +327,7 @@ void PlayFrames(const std::string& folder, std::vector<sad::CloudPtr> &frames_sa
         viewer.spinOnce(10);
 
         // 500 ms 切换下一帧
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
         // 更新点云内容
         viewer.updatePointCloud(vis_clouds[idx], cloud_id);
@@ -340,17 +340,28 @@ void PlayFrames(const std::string& folder, std::vector<sad::CloudPtr> &frames_sa
 }
 
 
+
+SE3 last_kf_pose = SE3();
+float leafsize = 0.3;
+
+
+ // 检测是否为关键帧
+ bool IsKeyframe(const SE3& current_pose)
+ {
+    SE3 delta = last_kf_pose.inverse() * current_pose;
+    return delta.translation().norm() > 0.5 || delta.so3().log().norm() > 10 * M_PI / 180;  // 弧度转化为度
+ }
+
  void test_templocal_lo(bool & is_vis)
  {
     std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
-    sad::CloudPtr output_cloud(new sad::PointCloudType);    // 输出点云
 
     LOG(INFO) << "测试程序启动" ;
     // ReadandShowFrame();
 
-    is_vis = false;
+    is_vis = true;
     // 读取相关的点云数据，现在直接加载为sad::CloudPtr格式，便于NDT使用
-    PlayFrames(Frame_pcd_dir, frames_sad, 900, 100, is_vis);  // 从 900 开始加载 10 个点云
+    PlayFrames(Frame_pcd_dir, frames_sad, 800, 1500, is_vis);  // 从 900 开始加载 10 个点云
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 个点云";
 
     if (frames_sad.size() < 2) {
@@ -368,31 +379,104 @@ void PlayFrames(const std::string& folder, std::vector<sad::CloudPtr> &frames_sa
     ndt_options.min_effective_pts_ = 5;  // 最小有效点数
     sad::Ndt3d ndt(ndt_options);
 
-    // 取出第0个和第1个点云进行NDT配准
-    sad::CloudPtr target_cloud = frames_sad[0];  // 目标点云
-    sad::CloudPtr scan = frames_sad[1];  // 源点云
-    sad::CloudPtr scan_world(new sad::PointCloudType); // 变换后的源点云
+    sad::CloudPtr output_cloud(new sad::PointCloudType);    // 输出点云
 
+    // 取出第0个和第1个点云进行NDT配准
+    sad::CloudPtr target_cloud = sad::CloudPtr(new sad::PointCloudType);    // 目标点云
+    sad::CloudPtr scan = sad::CloudPtr(new sad::PointCloudType);            // 源点云
+    sad::CloudPtr local_map = sad::CloudPtr(new sad::PointCloudType);    // 输出点云
+    sad::CloudPtr scan_world = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
+
+    std::vector<SE3> estimated_poses;
+    std::deque<sad::CloudPtr> scan_wolrd_in_local_map;
+    SE3 guess = SE3();
+
+    // 创建体素化的的相关对象，优化地图
+    pcl::VoxelGrid<sad::PointType> voxel_grid;
+    voxel_grid.setLeafSize(leafsize, leafsize, leafsize);
     
+    ndt.SetTarget(frames_sad[0]);  // 设置初始目标点云
+
     for(int i = 1; i < frames_sad.size(); i++)
     {
-        ndt.SetSource(frames_sad[i]);
-        ndt.SetTarget(frames_sad[i-1]);
-        SE3 pose1;
-        ndt.AlignNdt(pose1);
-        std::cout << "NDT配准结果:\n " << pose1.matrix() << std::endl;
-        pcl::transformPointCloud(*frames_sad[i], *scan_world, pose1.matrix().cast<float>());
-         // 合并目标点云和变换后的源点云
-        *output_cloud += *scan_world;
+        sad::CloudPtr frames_sad_voxel = sad::CloudPtr(new sad::PointCloudType);    // 体素化后的点云
+        
+        // 体素化
+        std::cout << "当前点云大小: " << frames_sad[i]->size() << std::endl;
+        voxel_grid.setInputCloud(frames_sad[i]);
+        voxel_grid.filter(*frames_sad_voxel);
+        std::cout << "体素化后点云大小: " << frames_sad_voxel->size() << std::endl;
+
+        ndt.SetSource(frames_sad_voxel);
+        // ndt.SetTarget(frames_sad[i-1]);
+
+
+        // 1 恒速模型配准开始ndt的配准
+        if ( estimated_poses.size() < 2) {
+            // 第一次迭代时，使用初始猜测
+            ndt.AlignNdt(guess);
+        } else {
+            // 采取恒速模型预测相关的初始数值
+            SE3 T1 = estimated_poses[estimated_poses.size() - 1];  // 上一帧的估计位姿
+            SE3 T2 = estimated_poses[estimated_poses.size() - 2];  // 上上一帧的估计位姿
+            guess = T1 * (T2.inverse() * T1 );  // 初始猜测为上一帧的逆变换
+            ndt.AlignNdt(guess);
+        }
+
+        // 1 使用直接配准的方法
+        // ndt.AlignNdt(guess);
+
+        std::cout << "NDT配准结果:\n " << guess.matrix() << std::endl;
+        // 加入到估计位姿
+        estimated_poses.emplace_back(guess);
+        
+        
+        // 变换当前帧到局部地图坐标系
+        // sad::CloudPtr scan_world = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
+        scan_world.reset(new sad::PointCloudType);
+        pcl::transformPointCloud(*frames_sad_voxel, *scan_world, guess.matrix().cast<float>());
+
+        if (IsKeyframe(guess))
+        {
+            last_kf_pose = guess;
+
+            // 加入到局部地图
+            scan_wolrd_in_local_map.emplace_back(scan_world);
+            if (scan_wolrd_in_local_map.size() > 30) {
+                scan_wolrd_in_local_map.pop_front();
+            }
+
+            local_map.reset(new sad::PointCloudType);
+
+            for (auto& scan : scan_wolrd_in_local_map) {
+                *local_map += *scan;
+            }
+
+
+            // 打印出来当前的点云大小
+            LOG(INFO) << "当前第 " << i << " 帧, local_map大小: " << local_map->size();
+            ndt.SetTarget(local_map);  // 设置新的目标点云
+
+            *output_cloud += *local_map;
+        }
     }
+    LOG(INFO) << "开始存储地图, 地图大小: " << local_map->size();
     // 保存最终的点云结果
-    sad::SaveCloudToFile(output_cloud_path, *output_cloud);
+    sad::CloudPtr output_voxel = sad::CloudPtr(new sad::PointCloudType);
 
-    LOG(INFO) << "源点云大小: " << scan->size();
-    LOG(INFO) << "目标点云大小: " << target_cloud->size();
-
+    if (local_map->size() > 60000) {
+        voxel_grid.setLeafSize(leafsize, leafsize, leafsize);
+        LOG(INFO) << "地图过大，进行体素化";
+        LOG(INFO) << " 体素化前地图大小: " << output_cloud->size();
+        voxel_grid.setInputCloud(output_cloud);
+        // output_cloud.reset(new sad::PointCloudType);
+        voxel_grid.filter(*output_voxel);
+        LOG(INFO) << " 体素化后地图大小: " << output_voxel->size();
+    }
+    sad::SaveCloudToFile(output_cloud_path, *output_voxel);
     LOG(INFO) << "测试程序结束" ;
  }
+
 
 void test_rotate()
 {

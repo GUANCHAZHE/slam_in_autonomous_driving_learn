@@ -55,12 +55,6 @@ void DirectNDTLO::AddCloud(CloudPtr scan, SE3& pose) {
         Eigen::Vector3d t = pose.translation();
         Eigen::Matrix3d R = pose.rotationMatrix();
         Eigen::Vector3d euler = R.eulerAngles(0, 1, 2);
-        std::cout << "22--------- SE3f/SE3d 打印 --------- \n";
-        std::cout << "22平移 t = " << t.transpose() << "\n";
-        std::cout << "22旋转矩阵 R = \n" << R << "\n";
-        std::cout << "22欧拉角(rad) roll-pitch-yaw = " << euler.transpose() << "\n";
-        std::cout << "22欧拉角(deg)                = " << (euler * 180 / M_PI).transpose() << "\n";
-
         last_kf_pose_ = pose;
 
         // 重建local map
