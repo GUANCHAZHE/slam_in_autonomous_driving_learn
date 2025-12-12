@@ -30,6 +30,17 @@
 #include "ch7/ndt_3d.h"
 #include "common/point_cloud_utils.h"
 #include "common/math_utils.h"
+#include "common/io_utils.h"
+#include "common/sys_utils.h"
+#include "common/timer/timer.h"
+#include "ch3/eskf.hpp"
+#include "ch3/static_imu_init.h"
+
+// // ros 头文件
+DEFINE_string(bag_path, "./dataset/sad/ulhk/test3.bag", "path to rosbag");
+DEFINE_string(dataset_type, "ULHK", "NCLT/ULHK/UTBM/AVIA");                   // 数据集类型
+DEFINE_string(config, "./config/velodyne_ulhk.yaml", "path of config yaml");  // 配置文件类型
+DEFINE_bool(display_map, true, "display map?");
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
 
@@ -349,19 +360,48 @@ float leafsize = 0.3;
  bool IsKeyframe(const SE3& current_pose)
  {
     SE3 delta = last_kf_pose.inverse() * current_pose;
-    return delta.translation().norm() > 0.5 || delta.so3().log().norm() > 10 * M_PI / 180;  // 弧度转化为度
+    return delta.translation().norm() > 0.5 || delta.so3().log().norm() > 10 * sad::math::kDEG2RAD;  // 度转化为弧度 deg -> rad
  }
+ void loadRosbagImuData(  std::vector<IMUPtr>  &imu_data_buffer)
+{
+    // 加载rosbag中的imu数据
+    sad::RosbagIO rosbag_io(FLAGS_bag_path, sad::Str2DatasetType(FLAGS_dataset_type));
+
+    LOG(INFO) << "开始加载imu的数据" ;
+    rosbag_io
+        .AddImuHandle([&](IMUPtr imu) {
+            imu_data_buffer.emplace_back(imu);
+
+            // std::cout << " 正在读取相关的imu数据" << std::endl;
+            // 显示IMU数据
+            // std::cout << "IMU数据 - 时间戳: " << imu->timestamp_
+            //           << ", 陀螺仪: (" << imu->gyro_.x() << ", " << imu->gyro_.y() << ", " << imu->gyro_.z() << ")"
+            //           << ", 加速度: (" << imu->acce_.x() << ", " << imu->acce_.y() << ", " << imu->acce_.z() << ")"
+            //           << std::endl;
+
+            return true;
+        })
+        .Go();
+    LOG(INFO) << "结束加载imu的数据" ;
+    std::cout << "总共读取了 " << imu_data_buffer.size() << " 条IMU数据" << std::endl;
+}
 
  void test_templocal_lo(bool & is_vis)
  {
-    std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
+    // 是否可视化加载的数据
+    is_vis = false;
 
-    LOG(INFO) << "测试程序启动" ;
+
+    std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
+    std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
+    loadRosbagImuData(imu_data_buffer);
+
+    LOG(INFO) << "测试里程计程序启动" ;
     // ReadandShowFrame();
 
-    is_vis = true;
+
     // 读取相关的点云数据，现在直接加载为sad::CloudPtr格式，便于NDT使用
-    PlayFrames(Frame_pcd_dir, frames_sad, 800, 1500, is_vis);  // 从 900 开始加载 10 个点云
+    PlayFrames(Frame_pcd_dir, frames_sad, 900, 200, is_vis);  // 从 900 开始加载 10 个点云
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 个点云";
 
     if (frames_sad.size() < 2) {
@@ -423,7 +463,7 @@ float leafsize = 0.3;
             ndt.AlignNdt(guess);
         }
 
-        // 1 使用直接配准的方法
+        // // 1 使用直接配准的方法
         // ndt.AlignNdt(guess);
 
         std::cout << "NDT配准结果:\n " << guess.matrix() << std::endl;
@@ -474,7 +514,7 @@ float leafsize = 0.3;
         LOG(INFO) << " 体素化后地图大小: " << output_voxel->size();
     }
     sad::SaveCloudToFile(output_cloud_path, *output_voxel);
-    LOG(INFO) << "测试程序结束" ;
+    LOG(INFO) << "测试里程计程序结束" ;
  }
 
 
@@ -568,26 +608,71 @@ void test_transfomr()
     std::cout <<" T2w \n" << T2w.matrix() << std::endl;
     std::cout <<" T21 \n" << T21.matrix() << std::endl;
     // T21.matrix().eulerAngles(2,1,0);
-    std::cout << "T21 euler angles: \n" << T21.rotation().eulerAngles(2,1,0) << std::endl;
+    std::cout << "T21 euler angles: \n" << T21.rotation().eulerAngles(2,1,0).transpose() << std::endl;
 } 
 
+
+void test_eskf_imu()
+{
+    std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
+    loadRosbagImuData(imu_data_buffer);
+
+    sad::ESKFD eskf;
+    sad::ESKFD::Options eskf_options;
+
+    // 初始化eskf 专门的类
+    sad::StaticIMUInit imu_init;
+    sad::StaticIMUInit::Options imu_init_options;
+    imu_init_options.
+
+    
+    for (int i = 0; i < 3000; ++i) {
+        imu_init.AddIMU(*imu_data_buffer[i]);
+    }
+    if (imu_init.InitSuccess()) {
+        // 读取初始零偏，设置ESKF
+        eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
+        eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
+        eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
+
+        LOG(INFO) << "gyro_var_: \n " << eskf_options.gyro_var_;
+        LOG(INFO) << "acce_var_: \n " << eskf_options.acce_var_;
+        LOG(INFO) << "InitBg: \n " << imu_init.GetInitBg().transpose();
+        LOG(INFO) << "InitBa: \n " << imu_init.GetInitBa().transpose();
+        LOG(INFO) << "Gravity: \n " << imu_init.GetGravity().transpose();
+        
+        LOG(INFO) << "IMU初始化成功";
+    }
+
+}
+
 int main(int argc, char ** argv) {
+
+
+
 
     bool is_vis = true;
     // 启用日志系统
     google::InitGoogleLogging(argv[0]);
-    FLAGS_logtostderr = 1;  // 输出到标准错误
-    FLAGS_stderrthreshold = 0; // 输出所有级别的日志
-    FLAGS_colorlogtostderr = true; // 彩色输出
+    FLAGS_stderrthreshold = google::INFO;
+    FLAGS_colorlogtostderr = true;
+    // 解析命令行参数
+    google::ParseCommandLineFlags(&argc, &argv, true);
 
     LOG(INFO) << "主程序启动";
 
-    // 测试相关的代码
+    // 主要的相关的里程计测试代码
     // test_templocal_lo(is_vis);
     // test_rotate();
 
+    // test_transfomr();
 
-    test_transfomr();
+    // 测试读取rosbag的代码
+    // std::deque<IMUPtr> imu_data_buffer;
+    // loadRosbagImuData(imu_data_buffer);
+
+    // 测试eskf的相关程序
+    test_eskf_imu();
     LOG(INFO) << "主程序结束";
 
 
