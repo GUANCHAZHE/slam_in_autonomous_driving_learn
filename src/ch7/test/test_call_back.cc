@@ -386,22 +386,46 @@ float leafsize = 0.3;
     std::cout << "总共读取了 " << imu_data_buffer.size() << " 条IMU数据" << std::endl;
 }
 
+// 读取范围内的imu数据
+bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, double end_time, 
+                        std::vector<IMUPtr>& output_imus, size_t& current_imu_idx) {
+    // 简单遍历，实际可以使用二分查找优化
+    while (current_imu_idx < buffer.size()) {
+        if (buffer[current_imu_idx]->timestamp_ < start_time) {
+            current_imu_idx++;
+            continue;
+        }
+        if (buffer[current_imu_idx]->timestamp_ > end_time) {
+            break; // 超出范围
+        }
+        output_imus.push_back(buffer[current_imu_idx]);
+        current_imu_idx++;
+    }
+    return !output_imus.empty();
+}
+
  void test_templocal_lo(bool & is_vis)
  {
     // 是否可视化加载的数据
     is_vis = false;
-
+    int start_frame = 900;
+    int last_frame = 200;
 
     std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
     std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
+
+    // 加载所有的imu数据
     loadRosbagImuData(imu_data_buffer);
 
+    // 进行imu的初始化
+    
     LOG(INFO) << "测试里程计程序启动" ;
     // ReadandShowFrame();
 
 
-    // 读取相关的点云数据，现在直接加载为sad::CloudPtr格式，便于NDT使用
-    PlayFrames(Frame_pcd_dir, frames_sad, 900, 200, is_vis);  // 从 900 开始加载 10 个点云
+    // 读取相关的点云数据
+    // 现在直接加载为sad::CloudPtr格式，便于NDT使用
+    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);  // 从 900 开始加载 10 个点云
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 个点云";
 
     if (frames_sad.size() < 2) {
@@ -437,10 +461,18 @@ float leafsize = 0.3;
     
     ndt.SetTarget(frames_sad[0]);  // 设置初始目标点云
 
+
+    // 添加imu的相关配置文件
+    double last_scan_time = start_frame * 10;   // imu的当前的时间戳
+    size_t current_imu_idx = 0;
+
+    // 开始遍历所有的点云
     for(int i = 1; i < frames_sad.size(); i++)
     {
+
+        // ----------- 读取雷达数据 -----------------
         sad::CloudPtr frames_sad_voxel = sad::CloudPtr(new sad::PointCloudType);    // 体素化后的点云
-        
+
         // 体素化
         std::cout << "当前点云大小: " << frames_sad[i]->size() << std::endl;
         voxel_grid.setInputCloud(frames_sad[i]);
@@ -450,7 +482,10 @@ float leafsize = 0.3;
         ndt.SetSource(frames_sad_voxel);
         // ndt.SetTarget(frames_sad[i-1]);
 
+        // ----------- IMU数据
+        // std::vector<>
 
+        // NDT 匹配
         // 1 恒速模型配准开始ndt的配准
         if ( estimated_poses.size() < 2) {
             // 第一次迭代时，使用初始猜测
@@ -612,9 +647,8 @@ void test_transfomr()
 } 
 
 
-void test_eskf_imu()
+void test_eskf_imu(std::vector<IMUPtr> & imu_data_buffer)
 {
-    std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
     loadRosbagImuData(imu_data_buffer);
 
     sad::ESKFD eskf;
@@ -622,10 +656,13 @@ void test_eskf_imu()
 
     // 初始化eskf 专门的类
     sad::StaticIMUInit imu_init;
+    // 初始化imu初始化的相关配置
     sad::StaticIMUInit::Options imu_init_options;
-    imu_init_options.
+    // 书写配置 不使用轮速计
+    imu_init_options.use_speed_for_static_checking_ = false;
+    // 写入相关的配置
+    imu_init = sad::StaticIMUInit(imu_init_options);
 
-    
     for (int i = 0; i < 3000; ++i) {
         imu_init.AddIMU(*imu_data_buffer[i]);
     }
@@ -635,14 +672,22 @@ void test_eskf_imu()
         eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
         eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
 
-        LOG(INFO) << "gyro_var_: \n " << eskf_options.gyro_var_;
-        LOG(INFO) << "acce_var_: \n " << eskf_options.acce_var_;
-        LOG(INFO) << "InitBg: \n " << imu_init.GetInitBg().transpose();
-        LOG(INFO) << "InitBa: \n " << imu_init.GetInitBa().transpose();
-        LOG(INFO) << "Gravity: \n " << imu_init.GetGravity().transpose();
+        LOG(INFO) << "gyro_var_:  " << eskf_options.gyro_var_;
+        LOG(INFO) << "acce_var_:  " << eskf_options.acce_var_;
+        LOG(INFO) << "InitBg:  " << imu_init.GetInitBg().transpose();
+        LOG(INFO) << "InitBa:  " << imu_init.GetInitBa().transpose();
+        LOG(INFO) << "Gravity:  " << imu_init.GetGravity().transpose();
         
-        LOG(INFO) << "IMU初始化成功";
+        LOG(INFO) << "IMU静止结束成功";
     }
+
+    eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
+    eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
+    eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
+
+    LOG(INFO) << "IMU初始化成功";
+
+    
 
 }
 
