@@ -15,6 +15,7 @@ bool MessageSync::Sync() {
         return false;
     }
 
+    // 计算机械雷达的扫描持续时间
     if (!lidar_pushed_) {
         measures_.lidar_ = lidar_buffer_.front();
         measures_.lidar_begin_time_ = time_buffer_.front();
@@ -25,10 +26,12 @@ bool MessageSync::Sync() {
         lidar_pushed_ = true;
     }
 
+    // 雷达的扫描周期完整
     if (last_timestamp_imu_ < lidar_end_time_) {
         return false;
     }
 
+    // lidar扫描时间结束到上一次扫描时间开始这段时间内的imu数据
     double imu_time = imu_buffer_.front()->timestamp_;
     measures_.imu_.clear();
     while ((!imu_buffer_.empty()) && (imu_time < lidar_end_time_)) {

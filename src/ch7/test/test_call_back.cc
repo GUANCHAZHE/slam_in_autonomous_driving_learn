@@ -372,6 +372,7 @@ float leafsize = 0.3;
         .AddImuHandle([&](IMUPtr imu) {
             imu_data_buffer.emplace_back(imu);
 
+            // LOG(INFO) << "11111" ;
             // std::cout << " 正在读取相关的imu数据" << std::endl;
             // 显示IMU数据
             // std::cout << "IMU数据 - 时间戳: " << imu->timestamp_
@@ -388,7 +389,9 @@ float leafsize = 0.3;
 
 // 读取范围内的imu数据
 bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, double end_time, 
-                        std::vector<IMUPtr>& output_imus, size_t& current_imu_idx) {
+                        std::vector<IMUPtr>& output_imus, size_t& current_imu_idx) 
+{
+     std::cout<< "start_time: " << start_time << std::endl;    
     // 简单遍历，实际可以使用二分查找优化
     while (current_imu_idx < buffer.size()) {
         if (buffer[current_imu_idx]->timestamp_ < start_time) {
@@ -404,12 +407,34 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
     return !output_imus.empty();
 }
 
+void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_imus, 
+                size_t start, size_t last)
+{
+    start = start * 10;
+    
+    for (size_t i = start; i <= start + last && i < buffer.size(); ++i) {
+        output_imus.push_back(buffer[i]);
+    }
+}
+
  void test_templocal_lo(bool & is_vis)
  {
     // 是否可视化加载的数据
     is_vis = false;
     int start_frame = 900;
-    int last_frame = 200;
+    int last_frame = 300;
+    double scan_interval = 0.1; 
+
+    // 雷达和imu的外参
+    std::vector<double> ext_t = {0.0, 0.0, -0.28};
+    std::vector<double> ext_r = {
+                    2.67949e-08, -1.0, 0.0,    // 第一行
+                    1.0, 2.67949e-08, 0.0,     // 第二行  
+                    0.0, 0.0, 1.0              // 第三行
+                };
+    Vec3d Lidar_T_wrt_IMU = sad::math::VecFromArray(ext_t);
+    Mat3d Lidar_R_wrt_IMU = sad::math::MatFromArray(ext_r);
+    SE3 T_IL = SE3(Lidar_R_wrt_IMU, Lidar_T_wrt_IMU);
 
     std::vector<sad::CloudPtr> frames_sad;  // 使用sad::CloudPtr格式的点云容器
     std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
@@ -417,8 +442,31 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
     // 加载所有的imu数据
     loadRosbagImuData(imu_data_buffer);
 
+    // 当前第一帧的时间为
+
     // 进行imu的初始化
+    sad::StaticIMUInit imu_init;
+    sad::StaticIMUInit::Options imu_init_options;
+    imu_init_options.use_speed_for_static_checking_ = false;
+    imu_init = sad::StaticIMUInit(imu_init_options);
+
+    // 创建eskf的滤波器
+    sad::ESKFD eskf;
+    sad::ESKFD::Options eskf_options;
     
+    // 加载数据进行初始化
+    for (int i = 0; i < 3000; ++i) {
+        imu_init.AddIMU(*imu_data_buffer[i]);
+    }
+    
+    if( imu_init.InitSuccess()) {
+        // 从初始化中读取参数
+        eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);   // 假设各向同性，只读取第一个，代表三个轴的数值
+        eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
+        eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());    
+        LOG(INFO) << "eskf 初始化成功";
+    }
+
     LOG(INFO) << "测试里程计程序启动" ;
     // ReadandShowFrame();
 
@@ -459,6 +507,8 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
     pcl::VoxelGrid<sad::PointType> voxel_grid;
     voxel_grid.setLeafSize(leafsize, leafsize, leafsize);
     
+    // 地0帧加入局部地图
+    scan_wolrd_in_local_map.emplace_back(frames_sad[0]);
     ndt.SetTarget(frames_sad[0]);  // 设置初始目标点云
 
 
@@ -470,6 +520,8 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
     for(int i = 1; i < frames_sad.size(); i++)
     {
 
+        double current_sacn_time = last_scan_time + scan_interval;
+        std::cout << " -------" <<"当前是第几 ：" <<i << "-------" <<std::endl;
         // ----------- 读取雷达数据 -----------------
         sad::CloudPtr frames_sad_voxel = sad::CloudPtr(new sad::PointCloudType);    // 体素化后的点云
 
@@ -482,38 +534,69 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
         ndt.SetSource(frames_sad_voxel);
         // ndt.SetTarget(frames_sad[i-1]);
 
-        // ----------- IMU数据
-        // std::vector<>
+        // ----------- IMU数据 --------------------
+        //  ----------  开始预测
+        std::vector<IMUPtr> range_imus;
+        // GetIMUsInTimeRange(imu_data_buffer, start_frame * 10 + i, start_frame * 10 + 10* i, range_imus, current_imu_idx);
+        GetIMUData(imu_data_buffer, range_imus, start_frame + i -1, 10);
+        for (auto& imu : range_imus) {
+            eskf.Predict(*imu);
+        }
+
+
+
+
+        // ------------ 开始配准 ------------------------------
+        sad::CloudPtr frames_sad_voxel_trans = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
+        pcl::transformPointCloud(*frames_sad_voxel, *frames_sad_voxel_trans, T_IL.matrix());
+        frames_sad_voxel = frames_sad_voxel_trans;
+
+        // 从 imu 获取相关的姿态
+        SE3 pose_guess = eskf.GetNominalSE3();
 
         // NDT 匹配
         // 1 恒速模型配准开始ndt的配准
-        if ( estimated_poses.size() < 2) {
-            // 第一次迭代时，使用初始猜测
-            ndt.AlignNdt(guess);
-        } else {
-            // 采取恒速模型预测相关的初始数值
-            SE3 T1 = estimated_poses[estimated_poses.size() - 1];  // 上一帧的估计位姿
-            SE3 T2 = estimated_poses[estimated_poses.size() - 2];  // 上上一帧的估计位姿
-            guess = T1 * (T2.inverse() * T1 );  // 初始猜测为上一帧的逆变换
-            ndt.AlignNdt(guess);
-        }
+        // if ( estimated_poses.size() < 2) {
+        //     // 第一次迭代时，使用初始猜测
+        //     ndt.AlignNdt(guess);
+        // // } else {
+        // //     // 采取恒速模型预测相关的初始数值
+        // //     SE3 T1 = estimated_poses[estimated_poses.size() - 1];  // 上一帧的估计位姿
+        // //     SE3 T2 = estimated_poses[estimated_poses.size() - 2];  // 上上一帧的估计位姿
+        // //     guess = T1 * (T2.inverse() * T1 );  // 初始猜测为上一帧的逆变换
+        // //     ndt.AlignNdt(guess);
+        // } else {
+        //     ndt.AlignNdt(guess);
+        //     std::cout << "N修正前位姿:\n " << guess.matrix() << std::endl;
+        // }
 
-        // // 1 使用直接配准的方法
-        // ndt.AlignNdt(guess);
 
-        std::cout << "NDT配准结果:\n " << guess.matrix() << std::endl;
+        // ----------- 开始配准------------
+        // 2 使用imu得到的数据配准
+        ndt.AlignNdt(pose_guess);
+        LOG(INFO) <<  "修正前位姿 pose_guess:\n " << pose_guess.matrix();
         // 加入到估计位姿
-        estimated_poses.emplace_back(guess);
-        
+        estimated_poses.emplace_back(pose_guess);
         
         // 变换当前帧到局部地图坐标系
         // sad::CloudPtr scan_world = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
         scan_world.reset(new sad::PointCloudType);
-        pcl::transformPointCloud(*frames_sad_voxel, *scan_world, guess.matrix().cast<float>());
+        pcl::transformPointCloud(*frames_sad_voxel, *scan_world, pose_guess.matrix().cast<float>());
 
-        if (IsKeyframe(guess))
+        SE3 pose_of_lo = pose_guess;
+        // 将结果修正观测
+        eskf.ObserveSE3(pose_of_lo, 1e-2, 1e-2);
+
+        // 修正之后的结果
+        SE3 pose_fuesed = eskf.GetNominalSE3();
+
+        // 打印修正后的位姿
+        std::cout << "修正后的位姿:\n " << pose_fuesed.matrix() << std::endl;
+
+
+        if (IsKeyframe(pose_fuesed))
         {
-            last_kf_pose = guess;
+            last_kf_pose = pose_fuesed;
 
             // 加入到局部地图
             scan_wolrd_in_local_map.emplace_back(scan_world);
@@ -533,8 +616,12 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
             ndt.SetTarget(local_map);  // 设置新的目标点云
 
             *output_cloud += *local_map;
+            // *output_cloud += *scan_world;
+
         }
+        last_scan_time = current_sacn_time;
     }
+    LOG(INFO) << "imu_data_buffer[0]->timestamp_" <<     imu_data_buffer[0]->timestamp_;
     LOG(INFO) << "开始存储地图, 地图大小: " << local_map->size();
     // 保存最终的点云结果
     sad::CloudPtr output_voxel = sad::CloudPtr(new sad::PointCloudType);
@@ -549,6 +636,9 @@ bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, do
         LOG(INFO) << " 体素化后地图大小: " << output_voxel->size();
     }
     sad::SaveCloudToFile(output_cloud_path, *output_voxel);
+
+
+
     LOG(INFO) << "测试里程计程序结束" ;
  }
 
@@ -707,7 +797,7 @@ int main(int argc, char ** argv) {
     LOG(INFO) << "主程序启动";
 
     // 主要的相关的里程计测试代码
-    // test_templocal_lo(is_vis);
+    test_templocal_lo(is_vis);
     // test_rotate();
 
     // test_transfomr();
@@ -717,7 +807,7 @@ int main(int argc, char ** argv) {
     // loadRosbagImuData(imu_data_buffer);
 
     // 测试eskf的相关程序
-    test_eskf_imu();
+    // test_eskf_imu();
     LOG(INFO) << "主程序结束";
 
 

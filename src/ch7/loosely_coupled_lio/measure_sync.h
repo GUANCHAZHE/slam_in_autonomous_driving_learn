@@ -62,7 +62,7 @@ class MessageSync {
         conv_->Process(msg, cloud);
         lidar_buffer_.push_back(cloud);
         time_buffer_.push_back(msg->header.stamp.toSec());
-        last_timestamp_lidar_ = msg->header.stamp.toSec();
+        last_timestamp_lidar_ = msg->header.stamp.toSec();   // lidar的开始扫描时间
 
         // 尝试同步IMU与激光数据
         Sync();
@@ -101,7 +101,7 @@ class MessageSync {
     double last_timestamp_lidar_ = 0;               // 最近lidar时间
     std::deque<double> time_buffer_;
     bool lidar_pushed_ = false;
-    MeasureGroup measures_;
+    MeasureGroup measures_;                         // 雷达单帧开始和结束时间内的lidar和imu数据
     double lidar_end_time_ = 0;
 };
 

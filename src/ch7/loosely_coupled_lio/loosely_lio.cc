@@ -36,7 +36,8 @@ bool LooselyLIO::Init(const std::string &config_yaml) {
 
 bool LooselyLIO::LoadFromYAML(const std::string &yaml_file) {
     // get params from yaml
-    // 设置回调函数sync，使用的方式为lambda的方式来获取
+    // 设置回调函数sync，使用的方式为lambda的方式来获取，
+    // 只绑定，不执行
     sync_ = std::make_shared<MessageSync>([this](const MeasureGroup &m) { ProcessMeasurements(m); });
     sync_->Init(yaml_file);
 
