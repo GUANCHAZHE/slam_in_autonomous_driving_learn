@@ -35,6 +35,7 @@
 #include "common/timer/timer.h"
 #include "ch3/eskf.hpp"
 #include "ch3/static_imu_init.h"
+#include "tools/pcl_map_viewer.h"
 
 // // ros 头文件
 DEFINE_string(bag_path, "./dataset/sad/ulhk/test3.bag", "path to rosbag");
@@ -454,7 +455,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     sad::ESKFD eskf;
     sad::ESKFD::Options eskf_options;
     
-    // 加载数据进行初始化
+    // -----------------加载数据进行imu的初始化--------------
     for (int i = 0; i < 3000; ++i) {
         imu_init.AddIMU(*imu_data_buffer[i]);
     }
@@ -473,7 +474,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
     // 读取相关的点云数据
     // 现在直接加载为sad::CloudPtr格式，便于NDT使用
-    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);  // 从 900 开始加载 10 个点云
+    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);  // 
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 个点云";
 
     if (frames_sad.size() < 2) {
@@ -498,6 +499,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     sad::CloudPtr scan = sad::CloudPtr(new sad::PointCloudType);            // 源点云
     sad::CloudPtr local_map = sad::CloudPtr(new sad::PointCloudType);    // 输出点云
     sad::CloudPtr scan_world = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
+    sad::CloudPtr scan_0 = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
 
     std::vector<SE3> estimated_poses;
     std::deque<sad::CloudPtr> scan_wolrd_in_local_map;
@@ -507,6 +509,9 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     pcl::VoxelGrid<sad::PointType> voxel_grid;
     voxel_grid.setLeafSize(leafsize, leafsize, leafsize);
     
+    pcl::transformPointCloud(*frames_sad[0], *scan_0, T_IL.matrix());
+    frames_sad[0] = scan_0;
+
     // 地0帧加入局部地图
     scan_wolrd_in_local_map.emplace_back(frames_sad[0]);
     ndt.SetTarget(frames_sad[0]);  // 设置初始目标点云
@@ -522,20 +527,10 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
         double current_sacn_time = last_scan_time + scan_interval;
         std::cout << " -------" <<"当前是第几 ：" <<i << "-------" <<std::endl;
-        // ----------- 读取雷达数据 -----------------
-        sad::CloudPtr frames_sad_voxel = sad::CloudPtr(new sad::PointCloudType);    // 体素化后的点云
-
-        // 体素化
-        std::cout << "当前点云大小: " << frames_sad[i]->size() << std::endl;
-        voxel_grid.setInputCloud(frames_sad[i]);
-        voxel_grid.filter(*frames_sad_voxel);
-        std::cout << "体素化后点云大小: " << frames_sad_voxel->size() << std::endl;
-
-        ndt.SetSource(frames_sad_voxel);
-        // ndt.SetTarget(frames_sad[i-1]);
 
         // ----------- IMU数据 --------------------
-        //  ----------  开始预测
+        // ----------  开始预测
+        // 现在默认一帧的雷达读取相关的10帧的imu数据
         std::vector<IMUPtr> range_imus;
         // GetIMUsInTimeRange(imu_data_buffer, start_frame * 10 + i, start_frame * 10 + 10* i, range_imus, current_imu_idx);
         GetIMUData(imu_data_buffer, range_imus, start_frame + i -1, 10);
@@ -544,15 +539,24 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
         }
 
 
+        // ----------- 开始Ndt配准 ------------------------------
+        // ----------- 读取雷达数据 -----------------
+        sad::CloudPtr frames_sad_voxel = sad::CloudPtr(new sad::PointCloudType);          // 体素化后的点云
+        sad::CloudPtr frames_sad_voxel_trans_imu = sad::CloudPtr(new sad::PointCloudType);    // 体素化后的点云_变换到imu坐标系
 
+        // 体素化
+        std::cout << "当前点云大小: " << frames_sad[i]->size() << std::endl;
+        voxel_grid.setInputCloud(frames_sad[i]);
+        voxel_grid.filter(*frames_sad_voxel);
+        std::cout << "体素化后点云大小: " << frames_sad_voxel->size() << std::endl;
 
-        // ------------ 开始配准 ------------------------------
-        sad::CloudPtr frames_sad_voxel_trans = sad::CloudPtr(new sad::PointCloudType);      // 变换后的源点云
-        pcl::transformPointCloud(*frames_sad_voxel, *frames_sad_voxel_trans, T_IL.matrix());
-        frames_sad_voxel = frames_sad_voxel_trans;
+        // 当前点云体素化之后的点云转换到imu坐标系
+        pcl::transformPointCloud(*frames_sad_voxel, *frames_sad_voxel_trans_imu, T_IL.matrix());
+        frames_sad_voxel = frames_sad_voxel_trans_imu;
 
-        // 从 imu 获取相关的姿态
-        SE3 pose_guess = eskf.GetNominalSE3();
+        ndt.SetSource(frames_sad_voxel);
+        // ndt.SetTarget(frames_sad[i-1]);
+
 
         // NDT 匹配
         // 1 恒速模型配准开始ndt的配准
@@ -572,9 +576,18 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
 
         // ----------- 开始配准------------
-        // 2 使用imu得到的数据配准
-        ndt.AlignNdt(pose_guess);
+        // 从 imu 获取相关的姿态
+        SE3 pose_guess = eskf.GetNominalSE3();
         LOG(INFO) <<  "修正前位姿 pose_guess:\n " << pose_guess.matrix();
+
+        // 2 使用imu得到的数据配准
+        if (estimated_poses.size() < 2)
+        {
+            SE3 pose;
+            ndt.AlignNdt(pose);
+        } else {
+            ndt.AlignNdt(pose_guess);
+        }
         // 加入到估计位姿
         estimated_poses.emplace_back(pose_guess);
         
@@ -615,8 +628,8 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
             LOG(INFO) << "当前第 " << i << " 帧, local_map大小: " << local_map->size();
             ndt.SetTarget(local_map);  // 设置新的目标点云
 
-            *output_cloud += *local_map;
-            // *output_cloud += *scan_world;
+            // *output_cloud += *local_map;
+            *output_cloud += *scan_world;
 
         }
         last_scan_time = current_sacn_time;
@@ -642,6 +655,119 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     LOG(INFO) << "测试里程计程序结束" ;
  }
 
+ void test_Ndt_LO(bool &is_vis)
+ {
+    is_vis = false;
+    int start_frame = 900;
+    int last_frame = 300;
+    double voxel_size = 0.5;
+    int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
+
+    // 添加可视化组件
+    // std::shared_ptr<PCLM
+    
+    // ---------- 加载所有的点云数据
+    std::vector<sad::CloudPtr> frames_sad;
+    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);
+    LOG(INFO) << "加载完成 " << frames_sad.size() << " 帧点云";
+
+    // ---------- 创建ndt的配准对
+    sad::Ndt3d::Options ndt_options;
+    ndt_options.voxel_size_ = 0.5;
+    ndt_options.max_iteration_ = 30;
+    ndt_options.min_effective_pts_ = 5;
+    sad::Ndt3d ndt(ndt_options);
+
+    sad::CloudPtr target_cloud(new sad::PointCloudType);  // ndt 匹配的target目标点云
+    sad::CloudPtr source_cloud(new sad::PointCloudType);  // ndt 匹配的source点云
+    sad::CloudPtr loacl_map(new sad::PointCloudType);     // 局部点云地图
+    sad::CloudPtr output_cloud(new sad::PointCloudType);  // 保存的结果点云
+
+    std::vector<SE3> estimated_pose;
+    std::deque<sad::CloudPtr> scan_world_local;
+
+    // 开始处理第一帧的数据
+    ndt.SetTarget(frames_sad[0]);
+    scan_world_local.emplace_back(frames_sad[0]);
+
+    // 体素化相关的体积
+    pcl::VoxelGrid<sad::PointType> voxel_grid;
+    voxel_grid.setLeafSize(voxel_size, voxel_size, voxel_size);
+
+    // 正式开始遍历点云
+    for (int i = 1; i < frames_sad.size(); ++i)
+    {
+        LOG(INFO) << "---当前处理的第几--- " << i ;
+
+        // 将当前的每一帧体素化
+        voxel_grid.setInputCloud(frames_sad[i]);
+        LOG(INFO) << "体素之前的大小为" << frames_sad[i]->size();
+        voxel_grid.filter(*source_cloud);
+        LOG(INFO) << "体素之后的大小为" << source_cloud->size();
+
+        // ndt 设置当前的帧
+        ndt.SetSource(source_cloud);
+
+        // ----------- 开始配准
+        // ndt 匹配的初始数值选择
+        SE3 guess;
+        if ( estimated_pose.size() < 2 ) {
+            ndt.AlignNdt(guess);
+        } else {
+            // 采用恒速模型进行预测
+            SE3 T1 = estimated_pose[estimated_pose.size() - 1];
+            SE3 T2 = estimated_pose[estimated_pose.size() - 2];
+            guess = T1 * (T2.inverse() * T1);
+            ndt.AlignNdt(guess);
+        }
+        SE3 pose = guess;
+        estimated_pose.emplace_back(pose);
+        LOG(INFO) << "当前的位姿为pose \n" << pose.matrix();
+
+        // 将当前帧转换到世界坐标系下
+        sad::CloudPtr source_cloud_world(new sad::PointCloudType);  // ndt 匹配的source点云
+        pcl::transformPointCloud(*source_cloud, * source_cloud_world, pose.matrix());
+
+        if (IsKeyframe(pose)) {
+            LOG(INFO) << " 检测到关键帧";
+            // 保存当前的关键帧
+            last_kf_pose = pose;
+
+            // 加入到局部地图缓存队列
+            scan_world_local.emplace_back(source_cloud_world);
+            if ( scan_world_local.size() > num_kfs_in_local_map ){
+                scan_world_local.pop_front();
+            }
+
+            // 当前的局部地图大小
+            loacl_map.reset(new sad::PointCloudType);   // 重置缓存大小
+            for (auto& scan : scan_world_local) {
+                *loacl_map += *scan;
+            }
+
+            LOG(INFO) << "设置当前的local_map的大小" << loacl_map->size();
+            // 将新的local_map设置为target
+            ndt.SetTarget(loacl_map);
+
+            // 保存结果点云
+            *output_cloud += *source_cloud_world;
+        }
+    }
+
+    LOG(INFO) << " 开始存储点云地图 地图大小为" << output_cloud->size();
+
+    if (output_cloud->size() > 100000)
+    {
+        sad::CloudPtr output_voxel(new sad::PointCloudType);
+        voxel_grid.setInputCloud(output_cloud);
+        voxel_grid.filter(*output_voxel);
+        LOG(INFO) << "输出点云过大，进行体素化，体素化后大小为: " << output_voxel->size();
+        sad::SaveCloudToFile(output_cloud_path, *output_voxel);
+    } else {
+        sad::SaveCloudToFile(output_cloud_path, *output_cloud);
+    }
+
+ }
 
 void test_rotate()
 {
@@ -796,8 +922,10 @@ int main(int argc, char ** argv) {
 
     LOG(INFO) << "主程序启动";
 
+
+    test_Ndt_LO(is_vis);
     // 主要的相关的里程计测试代码
-    test_templocal_lo(is_vis);
+    // test_templocal_lo(is_vis);
     // test_rotate();
 
     // test_transfomr();
