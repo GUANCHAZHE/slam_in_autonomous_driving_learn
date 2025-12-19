@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from src.ch5_my.pointcloud import PointCloudProcessor
+from src.ch7.pointcloudy import PointCloudPlayer
 
 
 def test_bfnn_basic():
@@ -31,3 +32,25 @@ def test_scan_to_range_image_shape():
     assert img.dtype == np.uint8
     # image should have 3 channels
     assert img.ndim == 3 and img.shape[2] == 3
+
+
+def test_load_rosbag2_save_local_pcd():
+    """Test the ROS2 bag loading function."""
+    player = PointCloudPlayer()
+
+    # Check if ROS2 support is available
+    if not player.ROS2_SUPPORT_AVAILABLE:
+        print("Warning: ROS2 support not available, skipping ROS2 test")
+        # Just check that the function exists
+        assert hasattr(player, 'load_rosbag2_save_local_pcd')
+        return
+
+    # Test that the function exists and has correct signature
+    assert hasattr(player, 'load_rosbag2_save_local_pcd')
+
+    # This test would normally attempt to load an actual ROS2 bag file.
+    # For now, just verify the function exists and has expected parameters.
+    import inspect
+    sig = inspect.signature(player.load_rosbag2_save_local_pcd)
+    params = list(sig.parameters.keys())
+    assert 'output_dir' in params

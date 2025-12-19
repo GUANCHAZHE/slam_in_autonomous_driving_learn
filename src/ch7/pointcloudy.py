@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import time
 from cv2 import merge
 import open3d as o3d
@@ -6,6 +7,7 @@ import rosbag
 import sensor_msgs.point_cloud2 as pc2
 import os
 import glob
+from pathlib import Path
 import copy  # 用于深拷贝，防止修改原始数据
 import sophuspy as sp
 from scipy.spatial.transform import Rotation as Rscipy  # 你前面已经导入过
@@ -13,6 +15,16 @@ import pcl
 
 # 顶部添加：
 from scipy.spatial.transform import Rotation as R_scipy
+
+# For ROS2 support
+try:
+    from rosbags import rosbag2
+    from rosbags.typesys import get_types_from_msg, register_types
+    from rosbags.highlevel import AnyReader
+    import rosbags.serde
+    ROS2_SUPPORT_AVAILABLE = True
+except ImportError:
+    ROS2_SUPPORT_AVAILABLE = False
 
 class PointCloudPlayer:
     """点云加载、播放和配准工具类"""
@@ -28,8 +40,20 @@ class PointCloudPlayer:
         """
         self.frame_path = frame_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames"
         self.frame_path_pcd = frame_path_pcd or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd"
+        self.frame_path_pcd_ros2 = frame_path_pcd or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd_ros2"
         self.bag_path = bag_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/test2.bag"
+        # self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2_2000_01_01-08_05_21/"   # 直线
+        # self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2_2000_01_01-08_24_07/"   # 旋转
+        self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2-cs30-0/"                  # 旋转
+
+
         self.topic_name = topic_name or "/velodyne_points_0"
+        # self.topic_name_ros2 = topic_name or "/camera/depth/points"
+        # self.topic_name_ros2 = topic_name or "/camera/depth/points"           # astra
+        self.topic_name_ros2 = topic_name or "/camera1_SD0140820L0057/points2"  # cs30
+
+        
+
         self.all_frames = []
         self.scan_world = []
 
@@ -87,7 +111,7 @@ class PointCloudPlayer:
         if frame_path is None:
             frame_path = self.frame_path
             
-        file_paths = sorted(glob.glob(f"{frame_path}/*.npy"))
+        file_paths = sorted(glob.glob(frame_path + "/*.npy"))
 
         if not file_paths:
             print("未找到文件，请检查路径")
@@ -98,7 +122,7 @@ class PointCloudPlayer:
         self.all_frames = []
         for f in file_paths:
             self.all_frames.append(np.load(f))
-        print(f"预加载完成，共 {len(self.all_frames)} 帧")
+        print("预加载完成，共 {} 帧".format(len(self.all_frames)))
         
         return self.all_frames
 
@@ -130,7 +154,7 @@ class PointCloudPlayer:
         vis.reset_view_point(True)
 
         for i in range(len(all_frames)):
-            print(f"当前的播放帧 frame: {i}")
+            print("当前的播放帧 frame: {}".format(i))
             # 更新数据
             points = all_frames[i]
             pcd.points = o3d.utility.Vector3dVector(points)
@@ -216,8 +240,8 @@ class PointCloudPlayer:
 
     def load_rosbag_save_local_pcd(self, output_dir=None):
         """
-        从 rosbag 读取点云数据并保存为 npy 文件
-        
+        从 rosbag 读取点云数据并保存为 pcd 文件
+
         Args:
             output_dir: 输出目录，如果为 None 则使用 frame_path
         """
@@ -239,13 +263,13 @@ class PointCloudPlayer:
             pts = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
             points_np = np.array(list(pts), dtype=np.float32)   # (N,3)
 
-            # 转成 Open3D 点云 
-            pcd = o3d.geometry.PointCloud() 
+            # 转成 Open3D 点云
+            pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(points_np.astype(np.float64))
 
-            # 保存为 PCD 文件 
-            save_path = os.path.join(output_dir, f"frame_{frame_id:06d}.pcd") 
-            o3d.io.write_point_cloud(save_path, pcd, write_ascii=False) 
+            # 保存为 PCD 文件
+            save_path = os.path.join(output_dir, f"frame_{frame_id:06d}.pcd")
+            o3d.io.write_point_cloud(save_path, pcd, write_ascii=False)
             print(f"Saved {save_path} {points_np.shape[0]} points")
 
             frame_id += 1
@@ -253,6 +277,104 @@ class PointCloudPlayer:
         print(f"总共保存 {frame_id} 帧 PCD")
         bag.close()
 
+    def load_rosbag2_save_local_pcd(self, output_dir=None):
+            """
+            从 ROS2 rosbag2 读取点云数据并保存为 pcd 文件
+            (修复了 AnyReader 返回值解包顺序错误)
+            """
+            if not ROS2_SUPPORT_AVAILABLE:
+                print("错误: ROS2 支持不可用，请安装 rosbags 库: pip install rosbags")
+                return
+
+            target_bag_path = self.bag_path_ros2
+            target_topic = self.topic_name_ros2
+
+            if output_dir is None:
+                output_dir = self.frame_path_pcd_ros2
+
+            print(f"rosbag2_path: {target_bag_path}")
+            print(f"target_topic: {target_topic}")
+            print(f"output_dir: {output_dir}")
+
+            os.makedirs(output_dir, exist_ok=True)
+            frame_id = 0
+
+            if not os.path.exists(target_bag_path):
+                print(f"错误: ROS2 bag路径不存在: {target_bag_path}")
+                return
+
+            try:
+                from rosbags.highlevel import AnyReader
+                from pathlib import Path
+                import traceback
+
+                with AnyReader([Path(target_bag_path)]) as reader:
+                    connections = [x for x in reader.connections if x.topic == target_topic]
+
+                    if not connections:
+                        print(f"警告: 未找到话题 {target_topic}")
+                        return
+
+                    print(f"开始处理话题: {target_topic}")
+
+                    for connection in connections:
+                        # --- 核心修复：修正了解包顺序 (conn, ts, data) ---
+                        for conn, timestamp, rawdata in reader.messages(connections=[connection]):
+                            try:
+                                # 反序列化
+                                msg = reader.deserialize(rawdata, connection.msgtype)
+
+                                if 'PointCloud2' in connection.msgtype:
+                                    # 确保 raw_data 是 uint8 数组
+                                    if hasattr(msg.data, 'tobytes'):
+                                        raw_np = np.frombuffer(msg.data.tobytes(), dtype=np.uint8)
+                                    else:
+                                        raw_np = np.frombuffer(msg.data, dtype=np.uint8)
+
+                                    x_offset = y_offset = z_offset = -1
+                                    if hasattr(msg, 'fields'):
+                                        for field in msg.fields:
+                                            if field.name == 'x': x_offset = field.offset
+                                            elif field.name == 'y': y_offset = field.offset
+                                            elif field.name == 'z': z_offset = field.offset
+                                    
+                                    if x_offset >= 0 and y_offset >= 0 and z_offset >= 0:
+                                        point_step = msg.point_step
+                                        n_points = msg.width * msg.height
+                                        
+                                        if len(raw_np) == n_points * point_step:
+                                            raw_reshaped = raw_np.reshape(n_points, point_step)
+                                            
+                                            xs = raw_reshaped[:, x_offset:x_offset+4].copy().view(np.float32)
+                                            ys = raw_reshaped[:, y_offset:y_offset+4].copy().view(np.float32)
+                                            zs = raw_reshaped[:, z_offset:z_offset+4].copy().view(np.float32)
+                                            
+                                            points_np = np.hstack((xs, ys, zs))
+                                            mask = ~np.isnan(points_np).any(axis=1)
+                                            points_np = points_np[mask]
+                                            
+                                            if len(points_np) > 0:
+                                                pcd = o3d.geometry.PointCloud()
+                                                pcd.points = o3d.utility.Vector3dVector(points_np.astype(np.float64))
+                                                save_path = os.path.join(output_dir, "frame_{:06d}.pcd".format(frame_id))
+                                                o3d.io.write_point_cloud(save_path, pcd, write_ascii=False)
+                                                
+                                                if frame_id % 50 == 0:
+                                                    print(f"Saved frame {frame_id}, points: {len(points_np)}")
+                                                frame_id += 1
+                                        else:
+                                            pass 
+
+                            except Exception:
+                                traceback.print_exc()
+                                continue
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"读取错误: {str(e)}")
+
+            print(f"操作完成，总共保存 {frame_id} 帧 PCD")    
     @staticmethod
     def icp_registration(source, target, voxel_size=1.0, init_guess=None):
         """
@@ -542,8 +664,12 @@ def main():
     # 创建点云播放器实例
     player = PointCloudPlayer()
 
-    # 将rosbag转换为pcd格式的点云
-    player.load_rosbag_save_local_pcd()
+    # 将rosbag转换为pcd格式的点云 (ROS1)
+    # player.load_rosbag_save_local_pcd()
+
+    # 将rosbag2转换为pcd格式的点云 (ROS2) - 示例用法
+    player.load_rosbag2_save_local_pcd()
+
     # 从文件中读取点云帧
     # player.load_all_frame_npy()
 

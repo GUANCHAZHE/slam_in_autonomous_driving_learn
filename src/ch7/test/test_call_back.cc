@@ -37,11 +37,18 @@
 #include "ch3/static_imu_init.h"
 #include "tools/pcl_map_viewer.h"
 
+// ROS2 的文件
+// #include "rclcpp/rclcpp.hpp"
+
 // // ros 头文件
 DEFINE_string(bag_path, "./dataset/sad/ulhk/test3.bag", "path to rosbag");
 DEFINE_string(dataset_type, "ULHK", "NCLT/ULHK/UTBM/AVIA");                   // 数据集类型
 DEFINE_string(config, "./config/velodyne_ulhk.yaml", "path of config yaml");  // 配置文件类型
 DEFINE_bool(display_map, true, "display map?");
+
+
+//  创建C++的订阅文件
+
 
 typedef pcl::PointCloud<pcl::PointXYZ> PointCloud_XYZ;
 
@@ -233,6 +240,8 @@ private:
 };
 
 std::string Frame_pcd_dir = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd";
+std::string Frame_pcd_dir_ros2 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd_ros2";
+
 std::string frame_0 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd/frame_000000.pcd";
 std::string output_cloud_path = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/output_cloud.pcd";
 void ReadandShowFrame()
@@ -336,7 +345,7 @@ void PlayFrames(const std::string& folder, std::vector<sad::CloudPtr> &frames_sa
     LOG(INFO) << "点云开始播放";
     while (!viewer.wasStopped() && idx < frames_sad.size() && is_vis)
     {
-        viewer.spinOnce(10);
+        viewer.spinOnce(100);
 
         // 500 ms 切换下一帧
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -361,8 +370,10 @@ float leafsize = 0.3;
  bool IsKeyframe(const SE3& current_pose)
  {
     SE3 delta = last_kf_pose.inverse() * current_pose;
-    return delta.translation().norm() > 0.5 || delta.so3().log().norm() > 10 * sad::math::kDEG2RAD;  // 度转化为弧度 deg -> rad
- }
+    // return delta.translation().norm() > 0.5 || delta.so3().log().norm() > 10 * sad::math::kDEG2RAD;  // 度转化为弧度 deg -> rad    室外的参数
+    return delta.translation().norm() > 0.1 || delta.so3().log().norm() > 3 * sad::math::kDEG2RAD;  // 度转化为弧度 deg -> rad   室内的参数
+
+}
  void loadRosbagImuData(  std::vector<IMUPtr>  &imu_data_buffer)
 {
     // 加载rosbag中的imu数据
@@ -657,23 +668,20 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
  void test_Ndt_LO(bool &is_vis)
  {
-    is_vis = false;
-    int start_frame = 900;
-    int last_frame = 300;
-    double voxel_size = 0.5;
+    is_vis = true;
+    int start_frame = 0;
+    int last_frame = 200;
+    double voxel_size = 0.1;
     int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
-
-    // 添加可视化组件
-    // std::shared_ptr<PCLM
     
     // ---------- 加载所有的点云数据
     std::vector<sad::CloudPtr> frames_sad;
-    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);
+    PlayFrames(Frame_pcd_dir_ros2, frames_sad, start_frame, last_frame, is_vis);
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 帧点云";
 
     // ---------- 创建ndt的配准对
     sad::Ndt3d::Options ndt_options;
-    ndt_options.voxel_size_ = 0.5;
+    ndt_options.voxel_size_ = 0.05;
     ndt_options.max_iteration_ = 30;
     ndt_options.min_effective_pts_ = 5;
     sad::Ndt3d ndt(ndt_options);
@@ -768,6 +776,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     }
 
  }
+
 
 void test_rotate()
 {
