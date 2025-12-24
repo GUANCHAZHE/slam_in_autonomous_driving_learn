@@ -1,3 +1,12 @@
+// --- 添加开始 ---
+#include <pthread.h>
+// 强制修复 Ubuntu 22.04 下 Boost 库的 PTHREAD_STACK_MIN 错误
+#ifdef PTHREAD_STACK_MIN
+  #undef PTHREAD_STACK_MIN
+#endif
+#define PTHREAD_STACK_MIN 16384
+// --- 添加结束 ---
+
 #include <iostream>
 #include <functional> // for std::function
 #include <vector>
@@ -399,6 +408,14 @@ float leafsize = 0.3;
     std::cout << "总共读取了 " << imu_data_buffer.size() << " 条IMU数据" << std::endl;
 }
 
+
+//  TODO 
+// 书写一个ros1的读取path下的rosbag内的imu的数据，然后再将他存到buffer
+void LoadImuDataFromRosbag1(std::string path , std::string topic, std::vector<IMUPtr>  &imu_data_buffer) 
+{
+
+}
+
 // 读取范围内的imu数据
 bool GetIMUsInTimeRange(const std::vector<IMUPtr>& buffer, double start_time, double end_time, 
                         std::vector<IMUPtr>& output_imus, size_t& current_imu_idx) 
@@ -668,10 +685,10 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
  void test_Ndt_LO(bool &is_vis)
  {
-    is_vis = true;
+    is_vis = false;
     int start_frame = 0;
-    int last_frame = 200;
-    double voxel_size = 0.1;
+    int last_frame = 500;
+    double voxel_size = 0.05;
     int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
     
     // ---------- 加载所有的点云数据
@@ -679,9 +696,18 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     PlayFrames(Frame_pcd_dir_ros2, frames_sad, start_frame, last_frame, is_vis);
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 帧点云";
 
+    // 开始imu的相关的数据
+    double scan_interval = 0.1;              // 扫描时间的内容
+    std::vector<IMUPtr> imu_data_buffer;     // 加载相关的imu的数据
+    
+    // 开始加载相关的imu数据 到 buffer
+    loadRosbagImuData(imu_data_buffer);      
+
+
+
     // ---------- 创建ndt的配准对
     sad::Ndt3d::Options ndt_options;
-    ndt_options.voxel_size_ = 0.05;
+    ndt_options.voxel_size_ = 0.15;
     ndt_options.max_iteration_ = 30;
     ndt_options.min_effective_pts_ = 5;
     sad::Ndt3d ndt(ndt_options);

@@ -104,3 +104,13 @@ target_link_libraries(test_call_back
         ${PROJECT_NAME}.common
         ${PROJECT_NAME}.ch7
         )
+
+# add_executable(test_ros 
+#         test/test_ros.cc
+#         )
+# target_link_libraries(test_ros
+#         ${PROJECT_NAME}.common
+#         ${PROJECT_NAME}.ch7
+#         ${third_party_libs}   # 通常包含 PCL, Eigen, GLog
+#         ${ROS2_LIBS}          # <--- 新增：链接 ROS 2 库       
+#         )

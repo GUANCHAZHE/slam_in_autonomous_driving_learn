@@ -1,6 +1,17 @@
 //
 // Created by xiang on 2021/7/20.
 //
+
+
+// --- 添加开始 ---
+#include <pthread.h>
+#ifdef PTHREAD_STACK_MIN
+  #undef PTHREAD_STACK_MIN
+#endif
+#define PTHREAD_STACK_MIN 16384
+// --- 添加结束 ---
+
+
 #include "common/io_utils.h"
 
 #include <glog/logging.h>

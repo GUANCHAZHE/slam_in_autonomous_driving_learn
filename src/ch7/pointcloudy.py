@@ -44,7 +44,9 @@ class PointCloudPlayer:
         self.bag_path = bag_path or "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/test2.bag"
         # self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2_2000_01_01-08_05_21/"   # 直线
         # self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2_2000_01_01-08_24_07/"   # 旋转
-        self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2-cs30-0/"                  # 旋转
+        # self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/rosbag2-cs30-0/"                  # 旋转
+        self.bag_path_ros2 = bag_path or "/home/keyirobot/Desktop/qixing_ws/rosbag/cs30-depth-imu-13/"                  # 
+
 
 
         self.topic_name = topic_name or "/velodyne_points_0"
