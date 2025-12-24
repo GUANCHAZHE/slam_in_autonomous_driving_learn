@@ -71,7 +71,7 @@ void Ndt3d::BuildVoxels() {
 }
 
 bool Ndt3d::AlignNdt(SE3& init_pose) {
-    LOG(INFO) << "aligning with ndt";
+    // LOG(INFO) << "aligning with ndt";
     assert(grids_.empty() == false);
 
     SE3 pose = init_pose;

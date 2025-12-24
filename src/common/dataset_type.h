@@ -15,6 +15,7 @@ enum class DatasetType {
     ULHK = 3,   // https://github.com/weisongwen/UrbanLoco
     UTBM = 4,   // https://epan-utbm.github.io/utbm_robocar_dataset/
     AVIA = 5,   // https://epan-utbm.github.io/utbm_robocar_dataset/
+    CS_30 = 6,  // 我们自己采集的数据集
     WXB_3D,     // 3d wxb
 };
 
@@ -36,6 +37,9 @@ inline DatasetType Str2DatasetType(const std::string& name) {
     }
     if (name == "AVIA") {
         return DatasetType::AVIA;
+    }
+    if (name == "CS_30") {
+        return DatasetType::CS_30;
     }
 
     return DatasetType::UNKNOWN;

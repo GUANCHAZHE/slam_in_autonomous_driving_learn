@@ -46,14 +46,28 @@
 #include "ch3/static_imu_init.h"
 #include "tools/pcl_map_viewer.h"
 
+// ROS消息头文件
+#include <sensor_msgs/Imu.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <rosbag/message_instance.h>
+
 // ROS2 的文件
 // #include "rclcpp/rclcpp.hpp"
 
 // // ros 头文件
+// 原始的ULHK数据集配置
 DEFINE_string(bag_path, "./dataset/sad/ulhk/test3.bag", "path to rosbag");
 DEFINE_string(dataset_type, "ULHK", "NCLT/ULHK/UTBM/AVIA");                   // 数据集类型
 DEFINE_string(config, "./config/velodyne_ulhk.yaml", "path of config yaml");  // 配置文件类型
 DEFINE_bool(display_map, true, "display map?");
+
+// 自定义数据集配置 (My_dataset - CS30)
+DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted.bag", "path to custom rosbag");
+DEFINE_string(custom_dataset_type, "CUSTOM", "Custom dataset type");           // 自定义数据集类型
+DEFINE_string(custom_config, "./config/velodyne_ulhk.yaml", "path of custom config yaml");
+DEFINE_string(pointcloud_topic, "/camera1_SD0140820L0057/points2", "PointCloud2 topic name");
+DEFINE_string(imu_topic, "/imu/data", "IMU topic name");
+DEFINE_bool(use_custom_dataset, false, "use custom dataset?");
 
 
 //  创建C++的订阅文件
@@ -406,6 +420,76 @@ float leafsize = 0.3;
         .Go();
     LOG(INFO) << "结束加载imu的数据" ;
     std::cout << "总共读取了 " << imu_data_buffer.size() << " 条IMU数据" << std::endl;
+}
+
+/**
+ * @brief 从自定义rosbag加载IMU数据 (支持自定义话题名称)
+ * @param imu_data_buffer IMU数据缓冲区
+ */
+void loadCustomRosbagImuData(std::vector<std::shared_ptr<sad::IMU>>& imu_data_buffer)
+{
+    // 加载自定义rosbag中的imu数据，使用MY_dataset类型
+    sad::RosbagIO rosbag_io(FLAGS_custom_bag_path, sad::DatasetType::CS_30);
+
+    LOG(INFO) << "开始加载自定义rosbag的IMU数据，话题: " << FLAGS_imu_topic;
+    
+    // 使用AddHandle通用处理函数处理自定义话题的IMU数据
+    rosbag_io.AddHandle(FLAGS_imu_topic, [&](const rosbag::MessageInstance &m) -> bool {
+        auto msg = m.instantiate<sensor_msgs::Imu>();
+        if (msg == nullptr) {
+            return false;
+        }
+        
+        // 创建IMU对象
+        auto imu = std::make_shared<sad::IMU>(
+            msg->header.stamp.toSec(),
+            Vec3d(msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z),
+            Vec3d(msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z)
+        );
+        imu_data_buffer.emplace_back(imu);
+        return true;
+    }).Go();
+    
+    LOG(INFO) << "结束加载自定义rosbag的IMU数据";
+    std::cout << "总共读取了 " << imu_data_buffer.size() << " 条IMU数据" << std::endl;
+}
+
+/**
+ * @brief 从自定义rosbag加载点云数据 (支持自定义话题名称)
+ * @param cloud_data_buffer 点云数据缓冲区
+ */
+void loadCustomRosbagPointCloudData(std::vector<sad::CloudPtr>& cloud_data_buffer)
+{
+    // 加载自定义rosbag中的点云数据，使用MY_dataset类型
+    sad::RosbagIO rosbag_io(FLAGS_custom_bag_path, sad::DatasetType::CS_30);
+
+    LOG(INFO) << "开始加载自定义rosbag的点云数据，话题: " << FLAGS_pointcloud_topic;
+    
+    // 使用AddPointCloud2Handle处理PointCloud2消息
+    rosbag_io.AddPointCloud2Handle(FLAGS_pointcloud_topic, [&](sensor_msgs::PointCloud2::Ptr msg) -> bool {
+        // 将PointCloud2消息转换为sad::CloudPtr格式
+        sad::FullCloudPtr full_cloud(new sad::FullPointCloudType);
+        pcl::fromROSMsg(*msg, *full_cloud);
+        
+        // 转换为sad::CloudPtr (PointType格式)
+        sad::CloudPtr cloud(new sad::PointCloudType);
+        cloud->resize(full_cloud->size());
+        for (size_t i = 0; i < full_cloud->size(); ++i) {
+            cloud->points[i].x = full_cloud->points[i].x;
+            cloud->points[i].y = full_cloud->points[i].y;
+            cloud->points[i].z = full_cloud->points[i].z;
+            cloud->points[i].intensity = full_cloud->points[i].intensity;
+        }
+        cloud->width = full_cloud->width;
+        cloud->height = full_cloud->height;
+        cloud->is_dense = full_cloud->is_dense;
+        
+        cloud_data_buffer.emplace_back(cloud);
+        return true;
+    }).Go();
+    
+    LOG(INFO) << "结束加载自定义rosbag的点云数据";
+    std::cout << "总共读取了 " << cloud_data_buffer.size() << " 帧点云数据" << std::endl;
 }
 
 
@@ -942,11 +1026,177 @@ void test_eskf_imu(std::vector<IMUPtr> & imu_data_buffer)
 
 }
 
+/**
+ * @brief 使用自定义CS30数据集进行NDT+IMU融合的里程计测试
+ * @param is_vis 是否进行可视化
+ */
+void test_Ndt_LO_CustomDataset(bool& is_vis)
+{
+    is_vis = false;
+    double voxel_size = 0.05;
+    int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
+    bool use_guess = true;           // 是否使用恒速模型进行预测
+    bool use_imu_prediction = true;  // 是否使用IMU预测的位姿作为初始猜测
+    
+    LOG(INFO) << "========== 自定义数据集 (CS30) NDT+IMU 里程计测试开始 ==========";
+    LOG(INFO) << "Rosbag路径: " << FLAGS_custom_bag_path;
+    LOG(INFO) << "点云话题: " << FLAGS_pointcloud_topic;
+    LOG(INFO) << "IMU话题: " << FLAGS_imu_topic;
+    
+    // ---------- 加载所有的点云数据
+    std::vector<sad::CloudPtr> frames_sad;
+    loadCustomRosbagPointCloudData(frames_sad);
+    LOG(INFO) << "加载完成 " << frames_sad.size() << " 帧点云";
+
+    if (frames_sad.size() < 2) {
+        LOG(WARNING) << "点云数据不足，无法进行NDT配准";
+        return;
+    }
+
+    // ---------- 加载IMU数据
+    std::vector<std::shared_ptr<sad::IMU>> imu_data_buffer;
+    loadCustomRosbagImuData(imu_data_buffer);
+
+    LOG(INFO) << "加载完成 " << imu_data_buffer.size() << " 条IMU数据";
+
+    if (imu_data_buffer.empty()) {
+        LOG(WARNING) << "IMU数据为空，无法进行IMU初始化";
+        return;
+    }
+
+    // ---------- 进行IMU初始化
+    sad::StaticIMUInit imu_init;
+    sad::StaticIMUInit::Options imu_init_options;
+    imu_init_options.use_speed_for_static_checking_ = false;
+    imu_init = sad::StaticIMUInit(imu_init_options);
+
+    // 使用前3000条IMU数据进行静止初始化
+    int init_imu_count = std::min(3000, (int)imu_data_buffer.size());
+    for (int i = 0; i < init_imu_count; ++i) {
+        imu_init.AddIMU(*imu_data_buffer[i]);
+    }
+
+    LOG(INFO) << " imu的第一帧的数据为gyro_ \n" << imu_data_buffer[0]->gyro_ << "\n acce_ \n"<< imu_data_buffer[0]->acce_; 
+
+    sad::ESKFD eskf;
+    sad::ESKFD::Options eskf_options;
+
+    if (imu_init.InitSuccess()) {
+        eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
+        eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
+        eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
+        LOG(INFO) << "IMU初始化成功";
+    } else {
+        LOG(WARNING) << "IMU初始化失败，使用默认配置";
+    }
+
+    // ---------- 创建ndt的配准对象
+    sad::Ndt3d::Options ndt_options;
+    ndt_options.voxel_size_ = 0.15;
+    ndt_options.max_iteration_ = 30;
+    ndt_options.min_effective_pts_ = 5;
+    sad::Ndt3d ndt(ndt_options);
+
+    sad::CloudPtr target_cloud(new sad::PointCloudType);  // ndt 匹配的target目标点云
+    sad::CloudPtr source_cloud(new sad::PointCloudType);  // ndt 匹配的source点云
+    sad::CloudPtr loacl_map(new sad::PointCloudType);     // 局部点云地图
+    sad::CloudPtr output_cloud(new sad::PointCloudType);  // 保存的结果点云
+
+    std::vector<SE3> estimated_pose;
+    std::deque<sad::CloudPtr> scan_world_local;
+
+    // ---------- 处理第一帧数据
+    ndt.SetTarget(frames_sad[0]);
+    scan_world_local.emplace_back(frames_sad[0]);
+
+    // 体素化相关的体积
+    pcl::VoxelGrid<sad::PointType> voxel_grid;
+    voxel_grid.setLeafSize(voxel_size, voxel_size, voxel_size);
+
+    // ---------- 正式开始遍历点云
+    for (int i = 1; i < frames_sad.size(); ++i)
+    {
+        // LOG(INFO) << "---处理第 " << i << " 帧点云---";
+
+        // 将当前的每一帧体素化
+        voxel_grid.setInputCloud(frames_sad[i]);
+        // LOG(INFO) << "体素化前大小: " << frames_sad[i]->size();
+        voxel_grid.filter(*source_cloud);
+        // LOG(INFO) << "体素化后大小: " << source_cloud->size();
+
+        // ndt 设置当前的帧
+        ndt.SetSource(source_cloud);
+
+        // ----------- 开始配准
+        // ndt 匹配的初始数值选择
+        SE3 guess;
+        if (estimated_pose.size() < 2) {
+            ndt.AlignNdt(guess);
+        } else if (use_guess){
+            // 采用恒速模型进行预测
+            SE3 T1 = estimated_pose[estimated_pose.size() - 1];
+            SE3 T2 = estimated_pose[estimated_pose.size() - 2];
+            guess = T1 * (T2.inverse() * T1);
+            ndt.AlignNdt(guess);
+        }else if (use_imu_prediction) {
+            // 使用IMU预测的位姿作为初始猜测
+            SE3 imu_pose = eskf.GetNominalSE3();
+            // LOG(INFO) << "使用IMU预测位姿作为初始猜测:\n" << imu_pose.matrix();
+            ndt.AlignNdt(imu_pose);
+        } else {
+            ndt.AlignNdt(guess);
+        }
+        SE3 pose = guess;
+        estimated_pose.emplace_back(pose);
+        // LOG(INFO) << "NDT配准后位姿:\n" << pose.matrix();
+
+        // 将当前帧转换到世界坐标系下
+        sad::CloudPtr source_cloud_world(new sad::PointCloudType);
+        pcl::transformPointCloud(*source_cloud, *source_cloud_world, pose.matrix());
+
+        // 检测是否为关键帧
+        if (IsKeyframe(pose)) {
+            // LOG(INFO) << "检测到关键帧";
+            last_kf_pose = pose;
+
+            // 加入到局部地图缓存队列
+            scan_world_local.emplace_back(source_cloud_world);
+            if (scan_world_local.size() > num_kfs_in_local_map) {
+                scan_world_local.pop_front();
+            }
+
+            // 更新局部地图
+            loacl_map.reset(new sad::PointCloudType);
+            for (auto& scan : scan_world_local) {
+                *loacl_map += *scan;
+            }
+
+            // LOG(INFO) << "局部地图大小: " << loacl_map->size();
+            ndt.SetTarget(loacl_map);
+
+            // 保存结果点云
+            *output_cloud += *source_cloud_world;
+        }
+    }
+
+    // ---------- 保存结果
+    LOG(INFO) << "开始存储点云地图，地图大小: " << output_cloud->size();
+
+    std::string output_path = "./dataset/sad/ulhk/cs30_output_cloud.pcd";
+    if (output_cloud->size() > 100000) {
+        sad::CloudPtr output_voxel(new sad::PointCloudType);
+        voxel_grid.setInputCloud(output_cloud);
+        voxel_grid.filter(*output_voxel);
+        LOG(INFO) << "输出点云过大，进行体素化后大小: " << output_voxel->size();
+        sad::SaveCloudToFile(output_path, *output_voxel);
+    } else {
+        sad::SaveCloudToFile(output_path, *output_cloud);
+    }
+
+    LOG(INFO) << "========== 自定义数据集 (CS30) NDT+IMU 里程计测试完成 ==========";
+}
+
 int main(int argc, char ** argv) {
-
-
-
-
     bool is_vis = true;
     // 启用日志系统
     google::InitGoogleLogging(argv[0]);
@@ -957,65 +1207,16 @@ int main(int argc, char ** argv) {
 
     LOG(INFO) << "主程序启动";
 
+    // 根据标志选择使用的数据集
+    if (FLAGS_use_custom_dataset) {
+        LOG(INFO) << "使用自定义数据集 (CS30)";
+        test_Ndt_LO_CustomDataset(is_vis);
+    } else {
+        LOG(INFO) << "使用原始ULHK数据集";
+        test_Ndt_LO(is_vis);
+    }
 
-    test_Ndt_LO(is_vis);
-    // 主要的相关的里程计测试代码
-    // test_templocal_lo(is_vis);
-    // test_rotate();
-
-    // test_transfomr();
-
-    // 测试读取rosbag的代码
-    // std::deque<IMUPtr> imu_data_buffer;
-    // loadRosbagImuData(imu_data_buffer);
-
-    // 测试eskf的相关程序
-    // test_eskf_imu();
     LOG(INFO) << "主程序结束";
-
-
-
-    // // 创建LIO模拟器
-
-    // SimulationLIO lio_system;
-
-    // std::cout << "\n开始模拟数据流..." << std::endl;
-
-    // // 5 帧的雷达 10hz 
-    // //     每个间隔内得到10帧的 imu 数据， 100hz
-    // // 模拟传感器数据流（类似ROSBag播放）
-    // for (int i = 0; i < 5; ++i) {
-    //     double timestamp = i * 0.2; // 每0.2秒一个激光雷达帧
-
-    //     // 创建模拟激光雷达点云数据
-    //     auto cloud = std::make_shared<PointCloud>(timestamp);
-    //     cloud->addPoint(1.0 + i, 2.0 + i);
-    //     cloud->addPoint(1.5 + i, 2.5 + i);
-    //     cloud->addPoint(2.0 + i, 3.0 + i);
-
-    //     // 模拟在激光雷达扫描期间接收多个IMU数据
-    //     for (int j = 0; j < 10; ++j) {
-    //         double imu_timestamp = timestamp + j * 0.01; // IMU数据频率更高
-    //         auto imu = std::make_shared<IMUData>(
-    //             imu_timestamp,
-    //             0.1 + j*0.01, 0.2 + j*0.01, 0.3 + j*0.01,  // 陀螺仪数据
-    //             9.8, 0.1, 0.2  // 加速度计数据
-    //         );
-
-    //         // 触发IMU回调函数
-    //         lio_system.IMUCallback(imu);
-    //     }
-
-    //     // 触发激光雷达回调函数
-    //     std::cout << "\n--- 激光雷达帧 " << i << " 到达 ---" << std::endl;
-    //     lio_system.PointCloudCallback(cloud);
-    // }
-
-    // std::cout << "\n=== 回调函数机制演示完成 ===" << std::endl;
-    // std::cout << "回调函数实现的关键点:" << std::endl;
-    // std::cout << "1. MessageSync类保存回调函数，在数据同步完成时调用" << std::endl;
-    // std::cout << "2. 使用lambda表达式捕获this指针，调用成员函数" << std::endl;
-    // std::cout << "3. 事件驱动模式：数据到达 -> 同步 -> 触发回调 -> 处理数据" << std::endl;
 
     return 0;
 }
