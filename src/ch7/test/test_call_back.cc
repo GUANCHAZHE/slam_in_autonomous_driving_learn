@@ -267,6 +267,38 @@ std::string Frame_pcd_dir_ros2 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_i
 
 std::string frame_0 = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/frames_pcd/frame_000000.pcd";
 std::string output_cloud_path = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in_autonomous_driving/dataset/sad/ulhk/output_cloud.pcd";
+
+
+/**
+ * 两帧雷达间的imu积分，只采取陀螺仪积分角度，再加上之前的世界位姿，推算下一时刻的世界位姿
+ */
+SE3 IntegrateIMU(std::vector<IMUPtr> &imu_range, const SE3& last_pose_world)
+{
+    // 初始化增量
+    Eigen::Vector3d P_wb = last_pose_world.translation();
+    Eigen::Quaterniond Q_wb = last_pose_world.unit_quaternion();
+    // Eigen::Vector3d V_w = current_velocity; // 上一时刻的世界坐标系速度
+
+    double dt = 0.01;  // 时间间隔假设为 0.01
+    for (const auto & imu : imu_range)
+    {
+        // 旋转的增量
+        Eigen::Vector3d gyro_dt = imu->gyro_ * dt;
+        Eigen::Quaterniond dq(1, gyro_dt.x() * 0.5, gyro_dt.y() * 0.5, gyro_dt.z() * 0.5);
+        dq.normalize();
+        Q_wb = Q_wb * dq;
+        Q_wb.normalize();
+
+        // 平移的增量
+        // imu速度转换到世界坐标系下
+        Eigen::Vector3d acc_w = Q_wb * imu->acce_;
+        // 计算位置增量
+        P_wb = P_wb + acc_w * dt * dt + 0.5 * acc_w * dt * dt;
+
+    }
+    return SE3(Q_wb, P_wb);
+}
+
 void ReadandShowFrame()
 {
     // 打印测试的相关pcd 点云
@@ -767,17 +799,34 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     LOG(INFO) << "测试里程计程序结束" ;
  }
 
+
+
  void test_Ndt_LO(bool &is_vis)
  {
     is_vis = false;
-    int start_frame = 0;
+
+    //  自身的配置文件
+    // int start_frame = 0;
+    // int last_frame = 500;
+    // double voxel_size = 0.05;
+    // int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
+ 
+
+    // ULHK
+    int start_frame = 800;
     int last_frame = 500;
-    double voxel_size = 0.05;
+    double voxel_size = 1.0;
     int num_kfs_in_local_map = 30;   // 组成局部地图的关键帧数量
-    
+    bool use_consistent_model = false;
+    bool use_imu_guess = false;
+    bool use_hybird_guess = true;
+
+
     // ---------- 加载所有的点云数据
     std::vector<sad::CloudPtr> frames_sad;
-    PlayFrames(Frame_pcd_dir_ros2, frames_sad, start_frame, last_frame, is_vis);
+    // PlayFrames(Frame_pcd_dir_ros2, frames_sad, start_frame, last_frame, is_vis);      // 使用自己的数据集
+    PlayFrames(Frame_pcd_dir, frames_sad, start_frame, last_frame, is_vis);           // 使用ulhk的数据集
+
     LOG(INFO) << "加载完成 " << frames_sad.size() << " 帧点云";
 
     // 开始imu的相关的数据
@@ -787,11 +836,11 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     // 开始加载相关的imu数据 到 buffer
     loadRosbagImuData(imu_data_buffer);      
 
-
-
     // ---------- 创建ndt的配准对
     sad::Ndt3d::Options ndt_options;
-    ndt_options.voxel_size_ = 0.15;
+    // ndt_options.voxel_size_ = 0.15;          // 室内数据集的参数
+    ndt_options.voxel_size_ = 0.5;          // 室内数据集的参数
+
     ndt_options.max_iteration_ = 30;
     ndt_options.min_effective_pts_ = 5;
     sad::Ndt3d ndt(ndt_options);
@@ -801,7 +850,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
     sad::CloudPtr loacl_map(new sad::PointCloudType);     // 局部点云地图
     sad::CloudPtr output_cloud(new sad::PointCloudType);  // 保存的结果点云
 
-    std::vector<SE3> estimated_pose;
+    std::vector<SE3> estimated_pose;                      // 保存估计的位姿，用于后续的恒速模型
     std::deque<sad::CloudPtr> scan_world_local;
 
     // 开始处理第一帧的数据
@@ -828,14 +877,47 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
         // ----------- 开始配准
         // ndt 匹配的初始数值选择
+
+        //------------- 进行imu的积分，估计这段时间的位姿
+        std::vector<IMUPtr> range_imus;
+        GetIMUData(imu_data_buffer, range_imus, start_frame + i -1, 8);
+        LOG(INFO) << "当前缓存的imu积分的数据为" <<range_imus.size();
+
+        // 获取当前时刻的位置
+        SE3 last_pose = estimated_pose.empty() ? SE3() : estimated_pose.back();
+        
+
         SE3 guess;
         if ( estimated_pose.size() < 2 ) {
             ndt.AlignNdt(guess);
-        } else {
+        } else if (use_consistent_model){
             // 采用恒速模型进行预测
             SE3 T1 = estimated_pose[estimated_pose.size() - 1];
             SE3 T2 = estimated_pose[estimated_pose.size() - 2];
             guess = T1 * (T2.inverse() * T1);
+            ndt.AlignNdt(guess);
+        } else if (use_imu_guess){
+        
+            // 开始积分得到imu递推的这段时间的位置
+            SE3 pose_imu = IntegrateIMU(range_imus, last_pose);
+            LOG(INFO) << "imu 预测的位姿为pose_imu \n" << pose_imu.matrix();
+
+            ndt.AlignNdt(pose_imu);
+            guess = pose_imu;
+        } else if (use_hybird_guess) {
+            // 恒速模型的数据的位移
+            SE3 T1 = estimated_pose[estimated_pose.size() - 1];
+            SE3 T2 = estimated_pose[estimated_pose.size() - 2];
+            guess = T1 * (T2.inverse() * T1);
+            Eigen::Vector3d P_delta = guess.translation();
+
+            // imu的旋转角度
+            SE3 pose_imu = IntegrateIMU(range_imus, last_pose);
+            Eigen::Quaterniond Q_delta = pose_imu.unit_quaternion();
+            // SE3 
+
+            // 拼接得到整体的位移位置猜测
+            SE3 guess = SE3(Q_delta, P_delta);
             ndt.AlignNdt(guess);
         }
         SE3 pose = guess;
@@ -869,6 +951,7 @@ void GetIMUData(const std::vector<IMUPtr>& buffer, std::vector<IMUPtr>& output_i
 
             // 保存结果点云
             *output_cloud += *source_cloud_world;
+            // *output_cloud += *loacl_map ;
         }
     }
 
@@ -1078,17 +1161,17 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
 
     LOG(INFO) << " imu的第一帧的数据为gyro_ \n" << imu_data_buffer[0]->gyro_ << "\n acce_ \n"<< imu_data_buffer[0]->acce_; 
 
-    sad::ESKFD eskf;
-    sad::ESKFD::Options eskf_options;
+    // sad::ESKFD eskf;
+    // sad::ESKFD:GetIMUData:Options eskf_options;
 
-    if (imu_init.InitSuccess()) {
-        eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
-        eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
-        eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
-        LOG(INFO) << "IMU初始化成功";
-    } else {
-        LOG(WARNING) << "IMU初始化失败，使用默认配置";
-    }
+    // if (imu_init.InitSuccess()) {
+    //     eskf_options.gyro_var_ = sqrt(imu_init.GetCovGyro()[0]);
+    //     eskf_options.acce_var_ = sqrt(imu_init.GetCovAcce()[0]);
+    //     eskf.SetInitialConditions(eskf_options, imu_init.GetInitBg(), imu_init.GetInitBa(), imu_init.GetGravity());
+    //     LOG(INFO) << "IMU初始化成功";
+    // } else {
+    //     LOG(WARNING) << "IMU初始化失败，使用默认配置";
+    // }
 
     // ---------- 创建ndt的配准对象
     sad::Ndt3d::Options ndt_options;
@@ -1140,9 +1223,9 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
             ndt.AlignNdt(guess);
         }else if (use_imu_prediction) {
             // 使用IMU预测的位姿作为初始猜测
-            SE3 imu_pose = eskf.GetNominalSE3();
+            // SE3 imu_pose = eskf.GetNominalSE3();
             // LOG(INFO) << "使用IMU预测位姿作为初始猜测:\n" << imu_pose.matrix();
-            ndt.AlignNdt(imu_pose);
+            // ndt.AlignNdt(imu_pose);
         } else {
             ndt.AlignNdt(guess);
         }
