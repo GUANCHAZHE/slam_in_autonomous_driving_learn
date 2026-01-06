@@ -62,12 +62,14 @@ DEFINE_string(config, "./config/velodyne_ulhk.yaml", "path of config yaml");  //
 DEFINE_bool(display_map, true, "display map?");
 
 // 自定义数据集配置 (My_dataset - CS30)
-DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted.bag", "path to custom rosbag");
+// DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted.bag", "path to custom rosbag");
+DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted-04.bag", "path to custom rosbag");
+
 DEFINE_string(custom_dataset_type, "CUSTOM", "Custom dataset type");           // 自定义数据集类型
 DEFINE_string(custom_config, "./config/velodyne_ulhk.yaml", "path of custom config yaml");
 DEFINE_string(pointcloud_topic, "/camera1_SD0140820L0057/points2", "PointCloud2 topic name");
 DEFINE_string(imu_topic, "/imu/data", "IMU topic name");
-DEFINE_bool(use_custom_dataset, false, "use custom dataset?");
+DEFINE_bool(use_custom_dataset, true, "use custom dataset?");
 
 
 //  创建C++的订阅文件
