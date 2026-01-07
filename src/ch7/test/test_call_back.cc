@@ -63,7 +63,8 @@ DEFINE_bool(display_map, true, "display map?");
 
 // 自定义数据集配置 (My_dataset - CS30)
 // DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted.bag", "path to custom rosbag");
-DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted-04.bag", "path to custom rosbag");
+// DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/cs30_ros1_converted-04.bag", "path to custom rosbag");
+DEFINE_string(custom_bag_path, "./dataset/sad/ulhk/1.bag", "path to custom rosbag");
 
 DEFINE_string(custom_dataset_type, "CUSTOM", "Custom dataset type");           // 自定义数据集类型
 DEFINE_string(custom_config, "./config/velodyne_ulhk.yaml", "path of custom config yaml");
@@ -527,9 +528,8 @@ void loadCustomRosbagPointCloudData(std::vector<sad::CloudPtr>& cloud_data_buffe
 }
 
 
-//  TODO 
-// 书写一个ros1的读取path下的rosbag内的imu的数据，然后再将他存到buffer
-void LoadImuDataFromRosbag1(std::string path , std::string topic, std::vector<IMUPtr>  &imu_data_buffer) 
+// #TODO 书写读取rosbag2 的点云数据，加载其中的点云
+void LoadPointCloudFromRosbag2(std::string &file, std::vector<sad::CloudPtr>& cloud_data_buffer)
 {
 
 }
@@ -1188,6 +1188,7 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
     sad::CloudPtr output_cloud(new sad::PointCloudType);  // 保存的结果点云
 
     std::vector<SE3> estimated_pose;
+    sad::CloudPtr trajectory(new sad::PointCloudType);   // 存储单独的轨迹点云，用于后续的显示
     std::deque<sad::CloudPtr> scan_world_local;
 
     // ---------- 处理第一帧数据
@@ -1244,6 +1245,19 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
             // LOG(INFO) << "检测到关键帧";
             last_kf_pose = pose;
 
+                    
+            // 将当前的轨迹保存为点云格式
+            sad::PointType pt;
+            pt.x = pose.translation().x();
+            pt.y = pose.translation().y();
+            pt.z = pose.translation().z();
+            pt.intensity = 255.0; // 给一个满强度，方便在强度模式下查看
+
+
+            trajectory->points.push_back(pt);
+            trajectory->width = trajectory->points.size();
+            trajectory->height = 1;
+
             // 加入到局部地图缓存队列
             scan_world_local.emplace_back(source_cloud_world);
             if (scan_world_local.size() > num_kfs_in_local_map) {
@@ -1268,6 +1282,11 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
     LOG(INFO) << "开始存储点云地图，地图大小: " << output_cloud->size();
 
     std::string output_path = "./dataset/sad/ulhk/cs30_output_cloud.pcd";
+    std::string output_tragectory_path = "./dataset/sad/ulhk/cs30_output_cloud_tragectory.pcd";
+
+    LOG(INFO) << " 开始存储轨迹地图";
+    sad::SaveCloudToFile(output_tragectory_path, *trajectory);
+    
     if (output_cloud->size() > 100000) {
         sad::CloudPtr output_voxel(new sad::PointCloudType);
         voxel_grid.setInputCloud(output_cloud);
