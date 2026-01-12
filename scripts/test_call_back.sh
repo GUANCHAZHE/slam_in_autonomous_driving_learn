@@ -1,0 +1,1 @@
+bash  ./bin/test_call_back --custom_bag_path ./dataset/sad/ulhk/rosbag1.bag --imu_topic /H30imu/data_raw

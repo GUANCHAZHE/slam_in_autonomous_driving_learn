@@ -2,19 +2,12 @@
     "configurations": [
         {
             "name": "Linux",
-            // 1. 告诉 VS Code 必须优先信赖编译数据库 (最快、最准)
             "compileCommands": "${workspaceFolder}/build/compile_commands.json",
-
-            // 2. includePath 只是备胎，当 compile_commands.json 还没生成，
-            //    或者打开了一个没被编译的 .h 文件时才用。
+            
+            // 这里的 includePath 只留 workspaceFolder 即可，其他的全部删掉
+            // 强迫插件去读 compile_commands.json，读不到就报错（反而能帮你发现编译问题）
             "includePath": [
-                // "${workspaceFolder}/**",
-                // "/opt/ros/noetic/include/**",
-                // 这里的系统库不需要加 **，也不需要加具体路径
-                // 因为 compile_commands.json 里已经包含了 -I/usr/include/pcl-1.10
-                // 如果你发现找不到头文件，再手动把具体路径补回来，但不要加 **
-                "/usr/include/pcl-1.10",
-                "/usr/include/eigen3"
+                "${workspaceFolder}/**"
             ],
             
             "defines": [],

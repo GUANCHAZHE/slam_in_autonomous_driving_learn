@@ -45,14 +45,35 @@ void Ndt3d::BuildVoxels() {
             // SVD 检查最大与最小奇异值，限制最小奇异值
             Eigen::JacobiSVD svd(v.second.sigma_, Eigen::ComputeFullU | Eigen::ComputeFullV);
             Vec3d lambda = svd.singularValues();
+
+            // 开始修改梯度
+            Vec3d normal = svd.matrixU().col(2);
+            bool is_ground = std::abs(normal.z()) > 0.9;
+            double min_lambda_ratio = 1e-3; 
+           if (is_ground) {
+                // 【关键策略】：如果是地面，我们人为地把它的厚度（最小特征值）压得更扁！
+                // 使得 Z 轴方向的约束权重暴增。
+                // 方法A：允许更小的方差比例 (例如 1e-5)
+                min_lambda_ratio = 1e-5; 
+                
+                // 方法B（可选）：不仅允许更小，还主动缩小它
+                // 这会让地面体素在 Z 轴方向产生巨大的梯度吸引力
+                lambda[2] *= 0.1; 
+            }
+
+
             if (lambda[1] < lambda[0] * 1e-3) {
                 lambda[1] = lambda[0] * 1e-3;
             }
 
-            if (lambda[2] < lambda[0] * 1e-3) {
-                lambda[2] = lambda[0] * 1e-3;
-            }
+            // if (lambda[2] < lambda[0] * 1e-3) {
+            //     lambda[2] = lambda[0] * 1e-3;
+            // }
 
+            // 对最小特征值应用我们刚才设定的 ratio
+            if (lambda[2] < lambda[0] * min_lambda_ratio) {
+                lambda[2] = lambda[0] * min_lambda_ratio;
+            }
             Mat3d inv_lambda = Vec3d(1.0 / lambda[0], 1.0 / lambda[1], 1.0 / lambda[2]).asDiagonal();  // ???
 
             // v.second.info_ = (v.second.sigma_ + Mat3d::Identity() * 1e-3).inverse();  // 避免出nan ???

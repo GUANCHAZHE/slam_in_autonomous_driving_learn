@@ -1,18 +1,69 @@
 {
-    "C_Cpp.default.includePath": [
-        "${workspaceFolder}/**",
-        "${workspaceFolder}/src/**"
-    ],
+    // ============================================
+    // 1. 性能优化核心设置 (解决卡顿)
+    // ============================================
+    // 只有当你切换窗口或鼠标点别处时才保存，打字时绝对流畅
+    "files.autoSave": "onFocusChange", 
+    
+    // 排除不必要的文件夹索引，减少CPU消耗
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/node_modules/*": true,
+        "**/build/**": true,
+        "**/devel/**": true
+    },
+
+    // ============================================
+    // 2. C++ 智能提示配置 (关键)
+    // ============================================
+    // 强行指定读取编译数据库。这是 ROS/PCL 项目补全准确且不卡的唯一秘诀。
+    // 只要你的代码 catkin_make 或 colcon build 过一次，这个文件就会生成。
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+    // 清空 includePath，强制让插件去读 compile_commands.json，避免双重索引导致卡顿
+    "C_Cpp.default.includePath": [], 
+    
     "C_Cpp.default.compilerPath": "/usr/bin/g++",
-    "C_Cpp.default.cppStandard": "c++17",
-    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.default.cppStandard": "c++14", // ROS Noetic 默认是 C++14, Humble 是 C++17
     "C_Cpp.intelliSenseEngine": "default",
+    
+    // 减少不必要的红色波浪线报错，只显示编译器的真实错误
+    "C_Cpp.errorSquiggles": "enabled",
+
+    // ============================================
+    // 3. Python & ROS 配置
+    // ============================================
+    // 【注意】请确认你的 ROS 版本！
+    // 如果你是 ROS1 (Noetic):
+    // "python.autoComplete.extraPaths": [
+    //     "/opt/ros/noetic/lib/python3/dist-packages",
+    //     "${workspaceFolder}/devel/lib/python3/dist-packages"
+    // ],
+    // "python.analysis.extraPaths": [
+    //     "/opt/ros/noetic/lib/python3/dist-packages",
+    //     "${workspaceFolder}/devel/lib/python3/dist-packages"
+    // ],
+    
+    // 如果你是 ROS2 (Humble)，请注释掉上面两段，使用下面这两段：
+    "python.autoComplete.extraPaths": [
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    
+
+    // ============================================
+    // 4. 其他辅助
+    // ============================================
+    // 如果有些 .h 文件被误识别为 C 语言，这里强制改为 C++
     "files.associations": {
-        "numeric": "cpp",
-        "map": "cpp",
-        "iosfwd": "cpp",
-        "core": "cpp",
-        "specialfunctions": "cpp",
+        "*.h": "cpp",
+        "*.hpp": "cpp",
+        "*.tcc": "cpp",
         "cctype": "cpp",
         "clocale": "cpp",
         "cmath": "cpp",
@@ -24,72 +75,6 @@
         "cstring": "cpp",
         "ctime": "cpp",
         "cwchar": "cpp",
-        "cwctype": "cpp",
-        "any": "cpp",
-        "array": "cpp",
-        "atomic": "cpp",
-        "strstream": "cpp",
-        "bitset": "cpp",
-        "chrono": "cpp",
-        "cinttypes": "cpp",
-        "codecvt": "cpp",
-        "complex": "cpp",
-        "condition_variable": "cpp",
-        "cstdint": "cpp",
-        "deque": "cpp",
-        "forward_list": "cpp",
-        "list": "cpp",
-        "unordered_map": "cpp",
-        "unordered_set": "cpp",
-        "vector": "cpp",
-        "exception": "cpp",
-        "algorithm": "cpp",
-        "functional": "cpp",
-        "iterator": "cpp",
-        "memory": "cpp",
-        "memory_resource": "cpp",
-        "optional": "cpp",
-        "random": "cpp",
-        "ratio": "cpp",
-        "regex": "cpp",
-        "set": "cpp",
-        "string": "cpp",
-        "string_view": "cpp",
-        "system_error": "cpp",
-        "tuple": "cpp",
-        "type_traits": "cpp",
-        "utility": "cpp",
-        "hash_map": "cpp",
-        "hash_set": "cpp",
-        "fstream": "cpp",
-        "future": "cpp",
-        "initializer_list": "cpp",
-        "iomanip": "cpp",
-        "iostream": "cpp",
-        "istream": "cpp",
-        "limits": "cpp",
-        "mutex": "cpp",
-        "new": "cpp",
-        "ostream": "cpp",
-        "shared_mutex": "cpp",
-        "sstream": "cpp",
-        "stdexcept": "cpp",
-        "streambuf": "cpp",
-        "thread": "cpp",
-        "cfenv": "cpp",
-        "typeindex": "cpp",
-        "typeinfo": "cpp",
-        "valarray": "cpp",
-        "variant": "cpp",
-        "bit": "cpp"
-    },
-    "ROS2.distro": "noetic",
-    "python.autoComplete.extraPaths": [
-        "/opt/ros/humble/lib/python3.10/site-packages",
-        "/opt/ros/humble/local/lib/python3.10/dist-packages"
-    ],
-    "python.analysis.extraPaths": [
-        "/opt/ros/humble/lib/python3.10/site-packages",
-        "/opt/ros/humble/local/lib/python3.10/dist-packages"
-    ]
+        "cwctype": "cpp"
+    }
 }

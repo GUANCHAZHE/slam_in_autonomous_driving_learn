@@ -273,6 +273,31 @@ std::string output_cloud_path = "/home/keyirobot/Desktop/qixing_ws/learn/slam_in
 
 
 /**
+ * @brief 强制将 3D 位姿投影到 2D 平面 (x, y, yaw)
+ *        去除 z 轴位移，去除 roll 和 pitch 旋转
+ */
+SE3 ConstrainTo2D(const SE3& pose_3d)
+{
+    // 1. 提取平移，并强制 Z = 0
+    Eigen::Vector3d t = pose_3d.translation();
+    t.z() = 0.0; 
+
+    // 2. 提取旋转，并转换为欧拉角 (ZYX顺序: Yaw, Pitch, Roll)
+    // rpy[0] = Yaw (绕Z), rpy[1] = Pitch (绕Y), rpy[2] = Roll (绕X)
+    Eigen::Vector3d rpy = pose_3d.so3().unit_quaternion().toRotationMatrix().eulerAngles(2, 1, 0);
+    
+    // 3. 只保留 Yaw (rpy[0])，将 Pitch 和 Roll 设为 0
+    double yaw = rpy[0]; 
+
+    // 4. 重新构建只有 Yaw 的旋转矩阵
+    // 绕 Z 轴旋转 yaw 角度
+    Eigen::AngleAxisd rotation_vector(yaw, Eigen::Vector3d::UnitZ());
+    Sophus::SO3d so3_2d(rotation_vector.toRotationMatrix());
+
+    // 5. 返回新的 "干净" 的 2D 位姿
+    return SE3(so3_2d, t);
+}
+/**
  * 两帧雷达间的imu积分，只采取陀螺仪积分角度，再加上之前的世界位姿，推算下一时刻的世界位姿
  */
 SE3 IntegrateIMU(std::vector<IMUPtr> &imu_range, const SE3& last_pose_world)
@@ -518,7 +543,8 @@ void loadCustomRosbagPointCloudData(std::vector<sad::CloudPtr>& cloud_data_buffe
         cloud->width = full_cloud->width;
         cloud->height = full_cloud->height;
         cloud->is_dense = full_cloud->is_dense;
-        
+        cloud->header.stamp = msg->header.stamp.toNSec() / 1000; // 获取当前的时间戳 纳秒转换到微秒
+
         cloud_data_buffer.emplace_back(cloud);
         return true;
     }).Go();
@@ -1199,10 +1225,18 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
     pcl::VoxelGrid<sad::PointType> voxel_grid;
     voxel_grid.setLeafSize(voxel_size, voxel_size, voxel_size);
 
+    std::vector<int> time_list;
     // ---------- 正式开始遍历点云
     for (int i = 1; i < frames_sad.size(); ++i)
     {
         // LOG(INFO) << "---处理第 " << i << " 帧点云---";
+        double time = frames_sad[i]->header.stamp;
+
+
+        time_list.push_back(time);
+        LOG(INFO) << "当前处理的时间是" << (unsigned long long)time;   // 尝试将它转换为长整型数据就看到变化
+        // std::cout << "当前处理的时间是: " << std::fixed << std::setprecision(0) 
+        //   << (double)frames_sad[i]->header.stamp << std::endl;
 
         // 将当前的每一帧体素化
         voxel_grid.setInputCloud(frames_sad[i]);
@@ -1223,6 +1257,26 @@ void test_Ndt_LO_CustomDataset(bool& is_vis)
             SE3 T1 = estimated_pose[estimated_pose.size() - 1];
             SE3 T2 = estimated_pose[estimated_pose.size() - 2];
             guess = T1 * (T2.inverse() * T1);
+
+            //---------- V1 -------   强制z 0
+            // 手动将z的平移设置为0
+            // guess.translation().z() = 0.0;    
+            
+
+            // // ---------V2 -----   强制二维
+            // // 1 手动将z的平移设置为0
+            // Eigen::Vector3d t = guess.translation();
+            // t.z() = 0.0;
+            // // 2 获取旋转，提取yaw角
+            // double yaw = guess.so3().log().z(); // 获取围绕z的旋转yaw角度
+            
+            // // 3 构造旋转矩阵
+            // Eigen::AngleAxisd new_rot_vector(yaw, Eigen::Vector3d::UnitZ());
+            // SO3 new_so3(new_rot_vector.toRotationMatrix());
+            
+            // // 4 重新赋值进去
+            // guess = Sophus::SE3d(new_so3, t);
+
             ndt.AlignNdt(guess);
         }else if (use_imu_prediction) {
             // 使用IMU预测的位姿作为初始猜测
